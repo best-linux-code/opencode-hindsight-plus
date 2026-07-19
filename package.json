@@ -1,7 +1,7 @@
 {
-  "name": "@vectorize-io/opencode-hindsight",
-  "version": "0.2.7",
-  "description": "Hindsight memory plugin for OpenCode - Give your AI coding agent persistent long-term memory",
+  "name": "opencode-hindsight-plus",
+  "version": "0.3.0",
+  "description": "Hindsight memory plugin for OpenCode with Claude Code-aligned per-turn auto-recall",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -21,16 +21,20 @@
     "long-term-memory",
     "coding-agent"
   ],
-  "author": "Vectorize <support@vectorize.io>",
+  "author": "best-linux-code",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vectorize-io/hindsight.git",
-    "directory": "hindsight-integrations/opencode"
+    "url": "git+https://github.com/best-linux-code/opencode-hindsight-plus.git"
   },
+  "bugs": {
+    "url": "https://github.com/best-linux-code/opencode-hindsight-plus/issues"
+  },
+  "homepage": "https://github.com/best-linux-code/opencode-hindsight-plus#readme",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
