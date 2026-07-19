@@ -1,0 +1,5 @@
+source: https://github.com/vectorize-io/hindsight
+path: hindsight-integrations/opencode
+tag: integrations/opencode/v0.2.7
+commit: 59d825dfca7b1edd74d95d06a2b3a3343480734f
+package: @vectorize-io/opencode-hindsight@0.2.7
