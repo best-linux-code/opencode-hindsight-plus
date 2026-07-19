@@ -132,17 +132,27 @@ describe("HindsightPlugin state sharing", () => {
     const result1 = await HindsightPlugin(input1 as any);
     const result2 = await HindsightPlugin(input2 as any);
 
-    await result1["experimental.chat.system.transform"]!(
-      { sessionID: "sess-A", model: {} },
-      { system: [] }
-    );
+    const msgOut1 = {
+      messages: [
+        {
+          info: { role: "user", sessionID: "sess-A" },
+          parts: [{ type: "text", text: "Shared-state recall query" }],
+        },
+      ],
+    };
+    await result1["experimental.chat.messages.transform"]!({}, msgOut1);
     const client0 = (HindsightClient as any).mock.instances[0];
     expect(client0.recall).toHaveBeenCalledTimes(1);
 
-    await result2["experimental.chat.system.transform"]!(
-      { sessionID: "sess-A", model: {} },
-      { system: ["base"] }
-    );
+    const msgOut2 = {
+      messages: [
+        {
+          info: { role: "user", sessionID: "sess-A" },
+          parts: [{ type: "text", text: "Shared-state recall query" }],
+        },
+      ],
+    };
+    await result2["experimental.chat.messages.transform"]!({}, msgOut2);
     const client1 = (HindsightClient as any).mock.instances[1];
     expect(client1.recall).not.toHaveBeenCalled();
   });

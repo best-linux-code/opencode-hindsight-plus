@@ -27,8 +27,8 @@ export interface HindsightConfig {
   minRecallPromptChars: number;
   /**
    * Where to inject recalled memories:
-   * - system: fold into system[0] (default; most provider-safe)
-   * - synthetic-user: append synthetic text part on latest user message (Claude-like hidden context experiment)
+   * - synthetic-user: synthetic text part on latest user message (default; Claude-like hidden context)
+   * - system: fold into system[0] (fallback if synthetic is problematic for a provider)
    */
   recallInjectMode: "system" | "synthetic-user";
   recallPromptPreamble: string;
@@ -75,7 +75,7 @@ const DEFAULTS: HindsightConfig = {
   recallContextTurns: 1,
   recallMaxQueryChars: 800,
   minRecallPromptChars: 5,
-  recallInjectMode: "system",
+  recallInjectMode: "synthetic-user",
   recallTags: [],
   recallTagsMatch: "any",
   recallPromptPreamble:
@@ -256,9 +256,9 @@ export function loadConfig(pluginOptions?: Record<string, unknown>): HindsightCo
   if (!VALID_INJECT_MODES.includes(result.recallInjectMode)) {
     console.error(
       `[Hindsight] Unknown recallInjectMode "${result.recallInjectMode}" — ` +
-        `valid: ${VALID_INJECT_MODES.join(", ")}. Falling back to "system".`
+        `valid: ${VALID_INJECT_MODES.join(", ")}. Falling back to "synthetic-user".`
     );
-    result.recallInjectMode = "system";
+    result.recallInjectMode = "synthetic-user";
   }
 
   return result;

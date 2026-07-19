@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHooks, type PluginState } from "./hooks.js";
 import { makeConfig } from "./test-helpers.js";
 
+function makeSystemConfig(overrides: Parameters<typeof makeConfig>[0] = {}) {
+  return makeConfig({ recallInjectMode: "system", ...overrides });
+}
+
 function makeState(): PluginState {
   return {
     turnCount: 0,
@@ -325,7 +329,7 @@ describe("dispose — force-retain active sessions", () => {
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig({ retainEveryNTurns: 10 }),
+      makeConfig({ retainEveryNTurns: 10, recallInjectMode: "system" }),
       state,
       makeOpencodeClient(messages)
     );
@@ -467,7 +471,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig(),
+      makeSystemConfig(),
       state,
       makeOpencodeClient([userMsg("What did we decide about auth?")])
     );
@@ -491,7 +495,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig(),
+      makeSystemConfig(),
       state,
       makeOpencodeClient([userMsg("Continue the refactor plan")])
     );
@@ -510,7 +514,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     });
     const state = makeState();
     const messages = [userMsg("Implement the login form")];
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
+    const hooks = createHooks(client, "bank", makeSystemConfig(), state, makeOpencodeClient(messages));
 
     const output1 = { system: ["base"] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
@@ -532,7 +536,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
 
     const state = makeState();
     const opencodeClient = makeOpencodeClient([userMsg("First question about auth")]);
-    const hooks = createHooks(client, "bank", makeConfig(), state, opencodeClient);
+    const hooks = createHooks(client, "bank", makeSystemConfig(), state, opencodeClient);
 
     const output1 = { system: ["base"] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
@@ -562,7 +566,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
       .mockResolvedValueOnce({ results: [{ text: "New mem", type: "observation" }] });
     const state = makeState();
     const opencodeClient = makeOpencodeClient([userMsg("Topic one about foo")]);
-    const hooks = createHooks(client, "bank", makeConfig(), state, opencodeClient);
+    const hooks = createHooks(client, "bank", makeSystemConfig(), state, opencodeClient);
 
     const output1 = { system: ["sys"] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
@@ -588,7 +592,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig({ minRecallPromptChars: 5 }),
+      makeSystemConfig({ minRecallPromptChars: 5 }),
       state,
       makeOpencodeClient([userMsg("hi")])
     );
@@ -602,7 +606,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
   it("skips when there is no user message yet", async () => {
     const client = makeClient();
     const output = { system: [] as string[] };
-    const hooks = createHooks(client, "bank", makeConfig(), makeState(), makeOpencodeClient([]));
+    const hooks = createHooks(client, "bank", makeSystemConfig(), makeState(), makeOpencodeClient([]));
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
@@ -617,7 +621,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     });
     const state = makeState();
     const messages = [userMsg("Retry this query please")];
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
+    const hooks = createHooks(client, "bank", makeSystemConfig(), state, makeOpencodeClient(messages));
 
     const output1 = { system: [] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
@@ -635,7 +639,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     client.recall.mockResolvedValue({ results: [] });
     const state = makeState();
     const messages = [userMsg("No memories expected here")];
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
+    const hooks = createHooks(client, "bank", makeSystemConfig(), state, makeOpencodeClient(messages));
 
     await hooks["experimental.chat.system.transform"](
       { sessionID: "sess-1", model: {} },
@@ -657,7 +661,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig({ autoRecall: false }),
+      makeSystemConfig({ autoRecall: false }),
       state,
       makeOpencodeClient([userMsg("Should not recall this")])
     );
@@ -679,7 +683,7 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const hooks = createHooks(
       client,
       "bank",
-      makeConfig({ recallContextTurns: 2 }),
+      makeSystemConfig({ recallContextTurns: 2 }),
       makeState(),
       makeOpencodeClient(messages)
     );

@@ -9,7 +9,7 @@ export function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightC
     recallContextTurns: 1,
     recallMaxQueryChars: 800,
     minRecallPromptChars: 5,
-    recallInjectMode: "system",
+    recallInjectMode: "synthetic-user",
     recallPromptPreamble: "",
     recallTags: [],
     recallTagsMatch: "any",
