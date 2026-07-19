@@ -54,6 +54,8 @@ export interface HindsightConfig {
   agentName: string;
 
   // Misc
+  /** Register knowledge page tools (Hindsight mental-models / Claude agent_knowledge pages). */
+  enableKnowledgePages: boolean;
   debug: boolean;
 }
 
@@ -104,6 +106,7 @@ const DEFAULTS: HindsightConfig = {
   agentName: "opencode",
 
   // Misc
+  enableKnowledgePages: true,
   debug: false,
 };
 
@@ -124,6 +127,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_DYNAMIC_BANK_ID: ["dynamicBankId", "bool"],
   HINDSIGHT_BANK_MISSION: ["bankMission", "string"],
   HINDSIGHT_BANK_ID_PREFIX: ["bankIdPrefix", "string"],
+  HINDSIGHT_ENABLE_KNOWLEDGE_PAGES: ["enableKnowledgePages", "bool"],
   HINDSIGHT_RETAIN_EVERY_N_TURNS: ["retainEveryNTurns", "int"],
   HINDSIGHT_RETAIN_OVERLAP_TURNS: ["retainOverlapTurns", "int"],
   HINDSIGHT_RETAIN_TOOL_CALLS: ["retainToolCalls", "bool"],

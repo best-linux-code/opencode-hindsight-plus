@@ -13,6 +13,7 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 - **Tool trajectory retain**: When `retainToolCalls` is true (default), tool call inputs/outputs are included in retained transcripts (skips `hindsight_*` tools to avoid feedback loops)
 - **Retain tag templates**: `retainTags` / `retainMetadata` support `{session_id}`, `{bank_id}`, `{timestamp}`, `{user_id}` (empty `user:` tags dropped when unset)
 - **Coding-oriented bank missions**: default `bankMission` / `retainMission` guide fact extraction
+- **Knowledge pages**: `hindsight_page_*` tools (Hindsight mental-models; Claude `agent_knowledge_*` equivalent). Create long-lived pages with a `source_query` that re-synthesizes after consolidations.
 - **Compaction hook**: Retains + injects query-relevant memories during context compaction so they survive window trimming
 
 ## Quick Start
@@ -123,6 +124,7 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_RETAIN_TOOL_CALLS` | Include tool call/result parts in retained transcripts | `true`                             |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated retain tags (templates supported)      | `{session_id}`                     |
 | `HINDSIGHT_USER_ID`           | Used by `{user_id}` template in retain tags/metadata   | (empty)                            |
+| `HINDSIGHT_ENABLE_KNOWLEDGE_PAGES` | Register `hindsight_page_*` tools                 | `true`                             |
 | `HINDSIGHT_RECALL_TAGS`       | Comma-separated, filter recalls                          | (none)                                |
 | `HINDSIGHT_RECALL_TAGS_MATCH` | Tag match mode: `any`, `all`, `any_strict`, `all_strict` | `any`                                 |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated, added to every retain                   | (none)                                |
@@ -159,6 +161,23 @@ Search long-term memory. The agent uses this proactively before answering questi
 ### `hindsight_reflect`
 
 Generate a synthesized answer from long-term memory. Unlike recall (raw memories), reflect produces a coherent summary.
+
+### Knowledge pages (`enableKnowledgePages`, default `true`)
+
+| Tool | Purpose |
+|------|---------|
+| `hindsight_page_list` | List page ids/names |
+| `hindsight_page_get` | Read full page content |
+| `hindsight_page_create` | Create page (`name` + `source_query`, optional `page_id`) |
+| `hindsight_page_update` | Update name / source_query |
+| `hindsight_page_delete` | Delete page |
+| `hindsight_page_refresh` | Re-run source_query against current memories |
+
+Disable:
+
+```json
+{ "enableKnowledgePages": false }
+```
 
 ## Dynamic Bank IDs (per-project isolation)
 

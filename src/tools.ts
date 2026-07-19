@@ -17,6 +17,7 @@ import {
   resolveRetainMetadata,
 } from "./content.js";
 import { ensureBankMission } from "./bank.js";
+import { createPageTools } from "./pages.js";
 import { Logger } from "./logger.js";
 
 export interface HindsightTools {
@@ -121,5 +122,18 @@ export function createTools(
     },
   });
 
-  return { hindsight_retain, hindsight_recall, hindsight_reflect };
+  const base: HindsightTools = {
+    hindsight_retain,
+    hindsight_recall,
+    hindsight_reflect,
+  };
+
+  if (!config.enableKnowledgePages) {
+    return base;
+  }
+
+  return {
+    ...base,
+    ...createPageTools(client, bankId, config, missionsSet, logger),
+  };
 }

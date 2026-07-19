@@ -14,17 +14,28 @@ const mockContext = {
 };
 
 describe("createTools", () => {
-  it("creates all three tools", () => {
+  it("creates core tools plus knowledge pages by default", () => {
     const client = { retain: vi.fn(), recall: vi.fn(), reflect: vi.fn() } as any;
     const tools = createTools(client, "test-bank", makeConfig());
 
     expect(tools.hindsight_retain).toBeDefined();
     expect(tools.hindsight_recall).toBeDefined();
     expect(tools.hindsight_reflect).toBeDefined();
+    expect(tools.hindsight_page_list).toBeDefined();
   });
 
   it("all tools have description and execute", () => {
-    const client = { retain: vi.fn(), recall: vi.fn(), reflect: vi.fn() } as any;
+    const client = {
+      retain: vi.fn(),
+      recall: vi.fn(),
+      reflect: vi.fn(),
+      listMentalModels: vi.fn().mockResolvedValue({ items: [] }),
+      getMentalModel: vi.fn(),
+      createMentalModel: vi.fn(),
+      updateMentalModel: vi.fn(),
+      deleteMentalModel: vi.fn(),
+      refreshMentalModel: vi.fn(),
+    } as any;
     const tools = createTools(client, "test-bank", makeConfig());
 
     for (const tool of Object.values(tools)) {

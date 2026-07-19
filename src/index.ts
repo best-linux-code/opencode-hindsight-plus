@@ -2,7 +2,7 @@
  * Hindsight OpenCode Plugin — persistent long-term memory for OpenCode agents.
  *
  * Provides:
- *   - Custom tools: hindsight_retain, hindsight_recall, hindsight_reflect
+ *   - Custom tools: hindsight_retain/recall/reflect + optional knowledge pages
  *   - Per-user-turn auto-recall (Claude Code UserPromptSubmit alignment)
  *   - Auto-retain on session.idle (Claude Code Stop alignment)
  *   - Force-retain on session.deleted + dispose (Claude Code SessionEnd alignment)
@@ -66,6 +66,7 @@ const HindsightPlugin: Plugin = async (input, options) => {
     authenticated: Boolean(config.hindsightApiToken),
     autoRecall: config.autoRecall,
     autoRetain: config.autoRetain,
+    knowledgePages: config.enableKnowledgePages,
   });
 
   const tools = createTools(client, bankId, config, state.missionsSet, logger);

@@ -86,9 +86,7 @@ export function isHindsightOperationalTool(name: string): boolean {
   const lower = name.toLowerCase();
   return (
     lower.startsWith("hindsight_") ||
-    lower.includes("hindsight_retain") ||
-    lower.includes("hindsight_recall") ||
-    lower.includes("hindsight_reflect") ||
+    lower.startsWith("hindsight_page_") ||
     /(?:^|__)(?:agent_knowledge_|knowledge_)/.test(lower)
   );
 }

@@ -29,6 +29,7 @@ export function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightC
     bankMission: "",
     retainMission: null,
     agentName: "opencode",
+    enableKnowledgePages: true,
     debug: false,
     ...overrides,
   };
