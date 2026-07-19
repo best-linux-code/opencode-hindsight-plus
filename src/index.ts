@@ -5,6 +5,8 @@
  *   - Custom tools: hindsight_retain, hindsight_recall, hindsight_reflect
  *   - Per-user-turn auto-recall (Claude Code UserPromptSubmit alignment)
  *   - Auto-retain on session.idle (Claude Code Stop alignment)
+ *   - Force-retain on session.deleted + dispose (Claude Code SessionEnd alignment)
+ *   - Optional tool-call retention (retainToolCalls)
  *   - Memory preservation during context compaction
  *
  * @example
@@ -32,6 +34,7 @@ const state: PluginState = {
   missionsSet: new Set(),
   turnRecall: new Map(),
   lastRetainedTurn: new Map(),
+  activeSessions: new Set(),
 };
 
 const HindsightPlugin: Plugin = async (input, options) => {

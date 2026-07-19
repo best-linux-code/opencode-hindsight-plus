@@ -8,6 +8,7 @@ function makeState(): PluginState {
     missionsSet: new Set(),
     turnRecall: new Map(),
     lastRetainedTurn: new Map(),
+    activeSessions: new Set(),
   };
 }
 
@@ -160,6 +161,159 @@ describe("event hook — session.idle", () => {
     });
 
     expect(client.retain).not.toHaveBeenCalled();
+  });
+
+  it("includes tool parts in retain transcript when retainToolCalls is true", async () => {
+    const client = makeClient();
+    const messages = [
+      userMsg("List the files"),
+      {
+        info: { role: "assistant" },
+        parts: [
+          { type: "text", text: "Listing now." },
+          {
+            type: "tool",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { command: "ls" },
+              output: "README.md\nsrc\n",
+              title: "ls",
+            },
+          },
+        ],
+      },
+    ];
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 1, retainToolCalls: true }),
+      makeState(),
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "sess-1" } },
+    });
+
+    expect(client.retain).toHaveBeenCalledTimes(1);
+    const transcript = client.retain.mock.calls[0][1] as string;
+    expect(transcript).toContain("[tool_call: bash]");
+    expect(transcript).toContain("ls");
+    expect(transcript).toContain("README.md");
+  });
+
+  it("skips hindsight_* tool parts to avoid feedback loops", async () => {
+    const client = makeClient();
+    const messages = [
+      userMsg("Remember this preference"),
+      {
+        info: { role: "assistant" },
+        parts: [
+          { type: "text", text: "Stored." },
+          {
+            type: "tool",
+            tool: "hindsight_retain",
+            state: {
+              status: "completed",
+              input: { content: "secret feedback" },
+              output: "ok",
+            },
+          },
+        ],
+      },
+    ];
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 1, retainToolCalls: true }),
+      makeState(),
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "sess-1" } },
+    });
+
+    const transcript = client.retain.mock.calls[0][1] as string;
+    expect(transcript).not.toContain("hindsight_retain");
+    expect(transcript).not.toContain("secret feedback");
+    expect(transcript).toContain("Stored.");
+  });
+});
+
+describe("event hook — session.deleted (SessionEnd flush)", () => {
+  it("force-retains pending turns even when under retainEveryNTurns", async () => {
+    const client = makeClient();
+    const messages = [userMsg("Only one turn so far"), assistantMsg("ok")];
+    const state = makeState();
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 10 }),
+      state,
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: {
+        type: "session.deleted",
+        properties: { info: { id: "sess-end" } },
+      },
+    });
+
+    expect(client.retain).toHaveBeenCalledTimes(1);
+    expect(state.lastRetainedTurn.get("sess-end")).toBe(1);
+    expect(state.activeSessions.has("sess-end")).toBe(false);
+  });
+
+  it("does not re-retain when already fully retained", async () => {
+    const client = makeClient();
+    const messages = [userMsg("Done"), assistantMsg("ok")];
+    const state = makeState();
+    state.lastRetainedTurn.set("sess-end", 1);
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 10 }),
+      state,
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: {
+        type: "session.deleted",
+        properties: { info: { id: "sess-end" } },
+      },
+    });
+
+    expect(client.retain).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispose — force-retain active sessions", () => {
+  it("force-retains pending turns for tracked sessions", async () => {
+    const client = makeClient();
+    const messages = [userMsg("Pending flush on dispose"), assistantMsg("ok")];
+    const state = makeState();
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 10 }),
+      state,
+      makeOpencodeClient(messages)
+    );
+
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "sess-d", model: {} },
+      { system: [] }
+    );
+    expect(state.activeSessions.has("sess-d")).toBe(true);
+
+    await hooks.dispose();
+
+    expect(client.retain).toHaveBeenCalledTimes(1);
+    expect(state.lastRetainedTurn.get("sess-d")).toBe(1);
   });
 });
 

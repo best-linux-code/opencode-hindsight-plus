@@ -3,9 +3,8 @@
  *
  * Aligned with Claude Code hindsight-memory:
  *   - experimental.chat.system.transform → per-user-turn auto-recall
- *     (Claude Code: UserPromptSubmit + additionalContext)
  *   - event (session.idle) → auto-retain after the assistant finishes
- *     (Claude Code: Stop hook)
+ *   - event (session.deleted) + dispose → force-retain pending turns (SessionEnd)
  *   - experimental.session.compacting → retain + inject for compaction
  */
 
@@ -20,24 +19,24 @@ import {
   prepareRetentionTranscript,
   sliceLastTurnsByUserBoundary,
   injectHindsightMemories,
+  buildMessageContent,
   type Message,
+  type ToolPartLike,
 } from "./content.js";
 import { ensureBankMission } from "./bank.js";
 
-/** Cached recall for one user turn (reused across tool-loop system transforms). */
 export interface TurnRecallCache {
   userTurnCount: number;
-  /** Formatted context, or null when API succeeded with zero results. */
   context: string | null;
 }
 
 export interface PluginState {
   turnCount: number;
   missionsSet: Set<string>;
-  /** Per-session last successful per-turn recall (Claude Code UserPromptSubmit). */
   turnRecall: Map<string, TurnRecallCache>;
-  /** Track last retained turn count per session to avoid duplicates */
   lastRetainedTurn: Map<string, number>;
+  /** Sessions observed this process — used by dispose force-retain. */
+  activeSessions: Set<string>;
 }
 
 interface EventInput {
@@ -65,12 +64,19 @@ interface SystemTransformOutput {
   system: string[];
 }
 
+type SessionPart = {
+  type: string;
+  text?: string;
+  tool?: string;
+  state?: ToolPartLike["state"];
+};
+
 type OpencodeClient = {
   session: {
     messages: (params: { path: { id: string } }) => Promise<{
       data?: Array<{
         info: { role: string };
-        parts: Array<{ type: string; text?: string }>;
+        parts: SessionPart[];
       }>;
       error?: unknown;
       request?: unknown;
@@ -81,6 +87,7 @@ type OpencodeClient = {
 
 export interface HindsightHooks {
   event: (input: EventInput) => Promise<void>;
+  dispose: () => Promise<void>;
   "experimental.session.compacting": (
     input: CompactingInput,
     output: CompactingOutput
@@ -112,6 +119,16 @@ function capMapSize<K, V>(map: Map<K, V>, max: number): void {
   if (first !== undefined) map.delete(first);
 }
 
+function extractSessionIdFromDeleted(properties: Record<string, unknown>): string | undefined {
+  if (typeof properties.sessionID === "string") return properties.sessionID;
+  const info = properties.info;
+  if (info && typeof info === "object" && info !== null) {
+    const id = (info as { id?: unknown }).id;
+    if (typeof id === "string") return id;
+  }
+  return undefined;
+}
+
 export function createHooks(
   hindsightClient: HindsightClient,
   bankId: string,
@@ -123,6 +140,14 @@ export function createHooks(
   interface RecallOutcome {
     context: string | null;
     ok: boolean;
+  }
+
+  function trackSession(sessionId: string): void {
+    state.activeSessions.add(sessionId);
+    if (state.activeSessions.size > 1000) {
+      const first = state.activeSessions.values().next().value;
+      if (first) state.activeSessions.delete(first);
+    }
   }
 
   async function recallForContext(query: string): Promise<RecallOutcome> {
@@ -152,7 +177,14 @@ export function createHooks(
     }
   }
 
-  async function getSessionMessages(sessionId: string): Promise<Message[]> {
+  /**
+   * @param includeToolCalls - retain path may include tools; recall path stays text-only
+   *   so tool dumps do not dilute the recall query.
+   */
+  async function getSessionMessages(
+    sessionId: string,
+    includeToolCalls: boolean
+  ): Promise<Message[]> {
     try {
       logger.debug(`getSessionMessages: fetching messages for session ${sessionId}`);
       const response = await opencodeClient.session.messages({
@@ -168,9 +200,9 @@ export function createHooks(
       for (const msg of rawMessages) {
         const role = msg.info.role;
         if (role !== "user" && role !== "assistant") continue;
-        const textParts = msg.parts.filter((p) => p.type === "text" && p.text).map((p) => p.text!);
-        if (textParts.length) {
-          messages.push({ role, content: textParts.join("\n") });
+        const content = buildMessageContent(msg.parts, includeToolCalls);
+        if (content.trim()) {
+          messages.push({ role, content });
         }
       }
       logger.debug(`getSessionMessages: raw=${rawMessages.length}, parsed=${messages.length}`);
@@ -210,20 +242,33 @@ export function createHooks(
     });
   }
 
-  async function handleSessionIdle(sessionId: string): Promise<void> {
-    logger.debug(`handleSessionIdle called for session ${sessionId}`);
+  /**
+   * Retain when there are user turns not yet covered by lastRetainedTurn.
+   * force=true ignores retainEveryNTurns (SessionEnd / dispose / deleted).
+   */
+  async function maybeRetainSession(
+    sessionId: string,
+    opts: { force: boolean; reason: string }
+  ): Promise<void> {
     if (!config.autoRetain) return;
 
-    const messages = await getSessionMessages(sessionId);
+    const messages = await getSessionMessages(sessionId, config.retainToolCalls);
     if (!messages.length) return;
 
     const userTurns = countUserTurns(messages);
     const lastRetained = state.lastRetainedTurn.get(sessionId) || 0;
-    logger.debug(
-      `handleSessionIdle: userTurns=${userTurns}, lastRetained=${lastRetained}, retainEveryNTurns=${config.retainEveryNTurns}`
-    );
+    const pending = userTurns - lastRetained;
 
-    if (userTurns - lastRetained < config.retainEveryNTurns) return;
+    if (pending <= 0) {
+      logger.debug(`${opts.reason}: nothing pending for ${sessionId}`);
+      return;
+    }
+    if (!opts.force && pending < config.retainEveryNTurns) {
+      logger.debug(
+        `${opts.reason}: waiting for more turns (${pending}/${config.retainEveryNTurns})`
+      );
+      return;
+    }
 
     try {
       await retainSession(sessionId, messages);
@@ -231,9 +276,12 @@ export function createHooks(
       logger.info(`Auto-retained ${messages.length} messages`, {
         session: sessionId,
         bank: bankId,
+        reason: opts.reason,
+        force: opts.force,
+        userTurns,
       });
     } catch (e) {
-      logger.error("Auto-retain failed", e);
+      logger.error(`Auto-retain failed (${opts.reason})`, e);
     }
   }
 
@@ -245,7 +293,22 @@ export function createHooks(
       if (evt.type === "session.idle") {
         const sessionId = (evt.properties as { sessionID?: string }).sessionID;
         if (sessionId) {
-          await handleSessionIdle(sessionId);
+          trackSession(sessionId);
+          await maybeRetainSession(sessionId, { force: false, reason: "session.idle" });
+        }
+        return;
+      }
+
+      // Claude Code SessionEnd equivalent: flush any pending turns.
+      if (evt.type === "session.deleted") {
+        const sessionId = extractSessionIdFromDeleted(
+          evt.properties as Record<string, unknown>
+        );
+        if (sessionId) {
+          trackSession(sessionId);
+          await maybeRetainSession(sessionId, { force: true, reason: "session.deleted" });
+          state.activeSessions.delete(sessionId);
+          state.turnRecall.delete(sessionId);
         }
       }
     } catch (e) {
@@ -253,12 +316,22 @@ export function createHooks(
     }
   };
 
+  const dispose = async (): Promise<void> => {
+    if (!config.autoRetain) return;
+    const sessionIds = [...state.activeSessions];
+    logger.debug(`dispose: force-retain ${sessionIds.length} active session(s)`);
+    for (const sessionId of sessionIds) {
+      await maybeRetainSession(sessionId, { force: true, reason: "dispose" });
+    }
+  };
+
   const compacting = async (input: CompactingInput, output: CompactingOutput): Promise<void> => {
     try {
-      const messages = await getSessionMessages(input.sessionID);
-      if (messages.length && config.autoRetain) {
+      trackSession(input.sessionID);
+      const retainMessages = await getSessionMessages(input.sessionID, config.retainToolCalls);
+      if (retainMessages.length && config.autoRetain) {
         try {
-          await retainSession(input.sessionID, messages);
+          await retainSession(input.sessionID, retainMessages);
           state.lastRetainedTurn.delete(input.sessionID);
           logger.debug("Pre-compaction retain completed");
         } catch (e) {
@@ -266,12 +339,13 @@ export function createHooks(
         }
       }
 
-      if (messages.length) {
-        const lastUserMsg = lastUserMessage(messages);
+      const recallMessages = await getSessionMessages(input.sessionID, false);
+      if (recallMessages.length) {
+        const lastUserMsg = lastUserMessage(recallMessages);
         if (lastUserMsg) {
           const query = composeRecallQuery(
             lastUserMsg.content,
-            messages,
+            recallMessages,
             config.recallContextTurns
           );
           const truncated = truncateRecallQuery(
@@ -290,13 +364,6 @@ export function createHooks(
     }
   };
 
-  /**
-   * Per-user-turn auto-recall (Claude Code UserPromptSubmit).
-   *
-   * OpenCode may re-run system.transform on every model call inside a tool
-   * loop. We call Hindsight only when the user-turn count advances; within the
-   * same turn we re-inject the cached block without another API round-trip.
-   */
   const systemTransform = async (
     input: SystemTransformInput,
     output: SystemTransformOutput
@@ -306,7 +373,10 @@ export function createHooks(
       const sessionId = input.sessionID;
       if (!sessionId) return;
 
-      const messages = await getSessionMessages(sessionId);
+      trackSession(sessionId);
+
+      // Recall queries stay text-only (no tool dumps).
+      const messages = await getSessionMessages(sessionId, false);
       const lastUser = lastUserMessage(messages);
       if (!lastUser) {
         logger.debug(`systemTransform: no user message yet for ${sessionId}`);
@@ -324,7 +394,6 @@ export function createHooks(
       const userTurns = countUserTurns(messages);
       const cached = state.turnRecall.get(sessionId);
 
-      // Same user turn → re-inject cache (tool loop / multi-step model calls).
       if (cached && cached.userTurnCount === userTurns) {
         if (cached.context) {
           applyContextToSystem(output, cached.context);
@@ -343,7 +412,6 @@ export function createHooks(
 
       const { context, ok } = await recallForContext(truncated);
 
-      // Only cache after a successful API round-trip so transient failures retry.
       if (ok) {
         state.turnRecall.set(sessionId, { userTurnCount: userTurns, context });
         capMapSize(state.turnRecall, 1000);
@@ -360,6 +428,7 @@ export function createHooks(
 
   return {
     event,
+    dispose,
     "experimental.session.compacting": compacting,
     "experimental.chat.system.transform": systemTransform,
   };
