@@ -16,6 +16,7 @@ export function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightC
     retainMode: "full-session",
     retainEveryNTurns: 10,
     retainOverlapTurns: 2,
+    retainToolCalls: true,
     retainContext: "opencode",
     retainTags: [],
     retainMetadata: {},

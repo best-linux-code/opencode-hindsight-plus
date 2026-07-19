@@ -60,6 +60,94 @@ export interface Message {
   content: string;
 }
 
+/** Minimal OpenCode tool-part shape used when retainToolCalls is enabled. */
+export interface ToolPartLike {
+  type: string;
+  tool?: string;
+  state?: {
+    status?: string;
+    input?: Record<string, unknown>;
+    output?: string;
+    error?: string;
+    title?: string;
+  };
+}
+
+const TOOL_INPUT_MAX = 500;
+const TOOL_OUTPUT_MAX = 1000;
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+/** True for hindsight operational tools — skip to avoid retain feedback loops. */
+export function isHindsightOperationalTool(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.startsWith("hindsight_") ||
+    lower.includes("hindsight_retain") ||
+    lower.includes("hindsight_recall") ||
+    lower.includes("hindsight_reflect") ||
+    /(?:^|__)(?:agent_knowledge_|knowledge_)/.test(lower)
+  );
+}
+
+/**
+ * Format an OpenCode tool part for retention transcripts.
+ * Returns null when the part should be skipped.
+ */
+export function formatToolPartForRetain(part: ToolPartLike): string | null {
+  if (part.type !== "tool") return null;
+  const name = (part.tool || "unknown").trim();
+  if (!name || isHindsightOperationalTool(name)) return null;
+
+  const state = part.state;
+  const input = state?.input ?? {};
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify(input);
+  } catch {
+    inputJson = String(input);
+  }
+  inputJson = truncate(inputJson, TOOL_INPUT_MAX);
+
+  const lines = [`[tool_call: ${name}]`, `input: ${inputJson}`];
+  if (state?.title) lines.push(`title: ${state.title}`);
+
+  if (state?.status === "completed" && typeof state.output === "string" && state.output) {
+    lines.push(`output: ${truncate(state.output, TOOL_OUTPUT_MAX)}`);
+  } else if (state?.status === "error" && state.error) {
+    lines.push(`error: ${truncate(state.error, TOOL_OUTPUT_MAX)}`);
+  } else if (state?.status) {
+    lines.push(`status: ${state.status}`);
+  }
+
+  lines.push("[tool_call:end]");
+  return lines.join("\n");
+}
+
+/**
+ * Build message content from OpenCode parts (text + optional tool parts).
+ */
+export function buildMessageContent(
+  parts: ReadonlyArray<{ type: string; text?: string } & Partial<ToolPartLike>>,
+  includeToolCalls: boolean
+): string {
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (part.type === "text" && part.text) {
+      chunks.push(part.text);
+      continue;
+    }
+    if (includeToolCalls && part.type === "tool") {
+      const formatted = formatToolPartForRetain(part);
+      if (formatted) chunks.push(formatted);
+    }
+  }
+  return chunks.join("\n\n");
+}
+
 /**
  * Compose a multi-turn recall query from conversation history.
  *

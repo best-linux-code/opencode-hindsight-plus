@@ -34,6 +34,8 @@ export interface HindsightConfig {
   retainMode: string;
   retainEveryNTurns: number;
   retainOverlapTurns: number;
+  /** Include tool call/result parts in retained transcripts (coding-context quality). */
+  retainToolCalls: boolean;
   retainContext: string;
   retainTags: string[];
   retainMetadata: Record<string, string>;
@@ -77,6 +79,9 @@ const DEFAULTS: HindsightConfig = {
   retainMode: "full-session",
   retainEveryNTurns: 10,
   retainOverlapTurns: 2,
+  // Plus default true: coding agents benefit from tool trajectory memory.
+  // Claude Code ships false; set false here to match Claude exactly.
+  retainToolCalls: true,
   retainContext: "opencode",
   retainTags: [],
   retainMetadata: {},
@@ -117,6 +122,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_BANK_ID_PREFIX: ["bankIdPrefix", "string"],
   HINDSIGHT_RETAIN_EVERY_N_TURNS: ["retainEveryNTurns", "int"],
   HINDSIGHT_RETAIN_OVERLAP_TURNS: ["retainOverlapTurns", "int"],
+  HINDSIGHT_RETAIN_TOOL_CALLS: ["retainToolCalls", "bool"],
   HINDSIGHT_RECALL_TAGS: ["recallTags", "string"],
   HINDSIGHT_RETAIN_TAGS: ["retainTags", "string"],
   HINDSIGHT_RECALL_TAGS_MATCH: ["recallTagsMatch", "string"],

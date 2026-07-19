@@ -8,6 +8,9 @@ import {
   truncateRecallQuery,
   sliceLastTurnsByUserBoundary,
   prepareRetentionTranscript,
+  formatToolPartForRetain,
+  buildMessageContent,
+  isHindsightOperationalTool,
 } from "./content.js";
 
 describe("stripMemoryTags", () => {
@@ -47,6 +50,49 @@ describe("injectHindsightMemories", () => {
     expect(result).toContain("new");
     expect(result).not.toContain("old");
     expect((result.match(/<hindsight_memories>/g) || []).length).toBe(1);
+  });
+});
+
+describe("formatToolPartForRetain / buildMessageContent", () => {
+  it("formats completed tool calls", () => {
+    const formatted = formatToolPartForRetain({
+      type: "tool",
+      tool: "bash",
+      state: {
+        status: "completed",
+        input: { command: "pwd" },
+        output: "/tmp\n",
+        title: "pwd",
+      },
+    });
+    expect(formatted).toContain("[tool_call: bash]");
+    expect(formatted).toContain("pwd");
+    expect(formatted).toContain("/tmp");
+    expect(formatted).toContain("[tool_call:end]");
+  });
+
+  it("skips hindsight operational tools", () => {
+    expect(isHindsightOperationalTool("hindsight_recall")).toBe(true);
+    expect(
+      formatToolPartForRetain({
+        type: "tool",
+        tool: "hindsight_recall",
+        state: { status: "completed", input: { query: "x" }, output: "y" },
+      })
+    ).toBeNull();
+  });
+
+  it("includes tools only when includeToolCalls is true", () => {
+    const parts = [
+      { type: "text", text: "hello" },
+      {
+        type: "tool",
+        tool: "read",
+        state: { status: "completed", input: { path: "a.ts" }, output: "code" },
+      },
+    ];
+    expect(buildMessageContent(parts, false)).toBe("hello");
+    expect(buildMessageContent(parts, true)).toContain("[tool_call: read]");
   });
 });
 
