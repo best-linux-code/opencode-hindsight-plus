@@ -1,13 +1,15 @@
-# @vectorize-io/opencode-hindsight
+# opencode-hindsight-plus
 
-Hindsight memory plugin for [OpenCode](https://opencode.ai) — give your AI coding agent persistent long-term memory across sessions.
+Hindsight memory plugin for [OpenCode](https://opencode.ai) — persistent long-term memory with **Claude Code-aligned per-turn auto-recall**.
+
+Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/opencode) with per-user-turn memory injection (see `SOURCE.txt`).
 
 ## Features
 
 - **Custom tools**: `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` — the agent calls these explicitly
-- **Auto-retain**: Captures conversation on `session.idle` and stores to Hindsight
-- **Memory injection**: Recalls relevant memories when a new session starts
-- **Compaction hook**: Injects memories during context compaction so they survive window trimming
+- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment) and injects `<hindsight_memories>` into the system prompt. Tool-loop model calls re-use the same turn's cache (no extra API call).
+- **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment) and stores to Hindsight
+- **Compaction hook**: Retains + injects query-relevant memories during context compaction so they survive window trimming
 
 ## Quick Start
 
@@ -20,7 +22,7 @@ Add to your `opencode.json` (project) or `~/.config/opencode/opencode.json` (glo
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@vectorize-io/opencode-hindsight"]
+  "plugin": ["opencode-hindsight-plus"]
 }
 ```
 
@@ -54,7 +56,7 @@ Or configure inline in `opencode.json`:
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     [
-      "@vectorize-io/opencode-hindsight",
+      "opencode-hindsight-plus",
       {
         "hindsightApiUrl": "http://localhost:8888"
       }
@@ -73,7 +75,7 @@ Pass options directly in `opencode.json`:
 {
   "plugin": [
     [
-      "@vectorize-io/opencode-hindsight",
+      "opencode-hindsight-plus",
       {
         "hindsightApiUrl": "http://localhost:8888",
         "bankId": "my-project",
@@ -108,11 +110,12 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_API_TOKEN`         | API key for authentication                               | (none — required for Hindsight Cloud) |
 | `HINDSIGHT_BANK_ID`           | Static memory bank ID                                    | `opencode`                            |
 | `HINDSIGHT_AGENT_NAME`        | Agent name for dynamic bank IDs                          | `opencode`                            |
-| `HINDSIGHT_AUTO_RECALL`       | Auto-recall on session start                             | `true`                                |
+| `HINDSIGHT_AUTO_RECALL`       | Auto-recall on every user turn                           | `true`                                |
 | `HINDSIGHT_AUTO_RETAIN`       | Auto-retain on session idle                              | `true`                                |
 | `HINDSIGHT_RETAIN_MODE`       | `full-session` or `last-turn`                            | `full-session`                        |
 | `HINDSIGHT_RECALL_BUDGET`     | Recall budget: `low`, `mid`, `high`                      | `mid`                                 |
 | `HINDSIGHT_RECALL_MAX_TOKENS` | Max tokens for recall results                            | `1024`                                |
+| `HINDSIGHT_MIN_RECALL_PROMPT_CHARS` | Skip auto-recall when user prompt is shorter        | `5`                                   |
 | `HINDSIGHT_RECALL_TAGS`       | Comma-separated, filter recalls                          | (none)                                |
 | `HINDSIGHT_RECALL_TAGS_MATCH` | Tag match mode: `any`, `all`, `any_strict`, `all_strict` | `any`                                 |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated, added to every retain                   | (none)                                |
