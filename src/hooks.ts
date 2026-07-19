@@ -71,8 +71,17 @@ type SessionPart = {
   type: string;
   text?: string;
   tool?: string;
+  synthetic?: boolean;
   state?: ToolPartLike["state"];
+  [key: string]: unknown;
 };
+
+interface MessagesTransformOutput {
+  messages: Array<{
+    info: { role: string; sessionID?: string; id?: string };
+    parts: SessionPart[];
+  }>;
+}
 
 type OpencodeClient = {
   session: {
@@ -99,6 +108,10 @@ export interface HindsightHooks {
     input: SystemTransformInput,
     output: SystemTransformOutput
   ) => Promise<void>;
+  "experimental.chat.messages.transform": (
+    input: Record<string, never>,
+    output: MessagesTransformOutput
+  ) => Promise<void>;
 }
 
 function countUserTurns(messages: readonly Message[]): number {
@@ -114,6 +127,40 @@ function lastUserMessage(messages: readonly Message[]): Message | undefined {
 
 function applyContextToSystem(output: SystemTransformOutput, context: string): void {
   output.system[0] = injectHindsightMemories(output.system[0] ?? "", context);
+}
+
+function isHindsightMemoryPart(part: SessionPart): boolean {
+  return (
+    part.type === "text" &&
+    typeof part.text === "string" &&
+    part.text.includes("<hindsight_memories>")
+  );
+}
+
+function applyContextToLatestUserMessage(
+  output: MessagesTransformOutput,
+  context: string
+): boolean {
+  for (let i = output.messages.length - 1; i >= 0; i--) {
+    const msg = output.messages[i];
+    if (msg.info.role !== "user") continue;
+    msg.parts = msg.parts.filter((p) => !isHindsightMemoryPart(p));
+    msg.parts.push({
+      type: "text",
+      text: context,
+      synthetic: true,
+    });
+    return true;
+  }
+  return false;
+}
+
+function sessionIdFromMessages(output: MessagesTransformOutput): string | undefined {
+  for (let i = output.messages.length - 1; i >= 0; i--) {
+    const id = output.messages[i]?.info?.sessionID;
+    if (typeof id === "string" && id) return id;
+  }
+  return undefined;
 }
 
 function capMapSize<K, V>(map: Map<K, V>, max: number): void {
@@ -369,65 +416,97 @@ export function createHooks(
     }
   };
 
+  /**
+   * Shared per-turn recall: returns context string (or null) and updates turn cache.
+   * Text-only messages for query composition (no tool dumps).
+   */
+  async function ensureTurnRecall(sessionId: string): Promise<string | null> {
+    trackSession(sessionId);
+
+    const messages = await getSessionMessages(sessionId, false);
+    const lastUser = lastUserMessage(messages);
+    if (!lastUser) {
+      logger.debug(`ensureTurnRecall: no user message yet for ${sessionId}`);
+      return null;
+    }
+
+    const prompt = lastUser.content.trim();
+    if (prompt.length < config.minRecallPromptChars) {
+      logger.debug(
+        `ensureTurnRecall: prompt too short (${prompt.length} < ${config.minRecallPromptChars}), skip`
+      );
+      return null;
+    }
+
+    const userTurns = countUserTurns(messages);
+    const cached = state.turnRecall.get(sessionId);
+
+    if (cached && cached.userTurnCount === userTurns) {
+      logger.debug(`ensureTurnRecall: cache hit session ${sessionId} turn ${userTurns}`);
+      return cached.context;
+    }
+
+    await ensureBankMission(hindsightClient, bankId, config, state.missionsSet, logger);
+
+    const query = composeRecallQuery(prompt, messages, config.recallContextTurns);
+    const truncated = truncateRecallQuery(query, prompt, config.recallMaxQueryChars);
+    logger.debug(`ensureTurnRecall: recalling turn ${userTurns}, queryLen=${truncated.length}`);
+
+    const { context, ok } = await recallForContext(truncated);
+    if (ok) {
+      state.turnRecall.set(sessionId, { userTurnCount: userTurns, context });
+      capMapSize(state.turnRecall, 1000);
+    }
+    return context;
+  }
+
   const systemTransform = async (
     input: SystemTransformInput,
     output: SystemTransformOutput
   ): Promise<void> => {
     try {
       if (!config.autoRecall) return;
+      if (config.recallInjectMode !== "system") return;
       const sessionId = input.sessionID;
       if (!sessionId) return;
 
-      trackSession(sessionId);
-
-      // Recall queries stay text-only (no tool dumps).
-      const messages = await getSessionMessages(sessionId, false);
-      const lastUser = lastUserMessage(messages);
-      if (!lastUser) {
-        logger.debug(`systemTransform: no user message yet for ${sessionId}`);
-        return;
-      }
-
-      const prompt = lastUser.content.trim();
-      if (prompt.length < config.minRecallPromptChars) {
-        logger.debug(
-          `systemTransform: prompt too short (${prompt.length} < ${config.minRecallPromptChars}), skip`
-        );
-        return;
-      }
-
-      const userTurns = countUserTurns(messages);
-      const cached = state.turnRecall.get(sessionId);
-
-      if (cached && cached.userTurnCount === userTurns) {
-        if (cached.context) {
-          applyContextToSystem(output, cached.context);
-          logger.debug(`Re-injected cached recall for session ${sessionId} turn ${userTurns}`);
-        }
-        return;
-      }
-
-      await ensureBankMission(hindsightClient, bankId, config, state.missionsSet, logger);
-
-      const query = composeRecallQuery(prompt, messages, config.recallContextTurns);
-      const truncated = truncateRecallQuery(query, prompt, config.recallMaxQueryChars);
-      logger.debug(
-        `systemTransform: recalling for turn ${userTurns}, queryLen=${truncated.length}`
-      );
-
-      const { context, ok } = await recallForContext(truncated);
-
-      if (ok) {
-        state.turnRecall.set(sessionId, { userTurnCount: userTurns, context });
-        capMapSize(state.turnRecall, 1000);
-      }
-
+      const context = await ensureTurnRecall(sessionId);
       if (context) {
         applyContextToSystem(output, context);
-        logger.debug(`Injected per-turn recall for session ${sessionId} turn ${userTurns}`);
+        logger.debug(`Injected per-turn recall into system for session ${sessionId}`);
       }
     } catch (e) {
       logger.error("System transform hook error", e);
+    }
+  };
+
+  const messagesTransform = async (
+    _input: Record<string, never>,
+    output: MessagesTransformOutput
+  ): Promise<void> => {
+    try {
+      if (!config.autoRecall) return;
+      if (config.recallInjectMode !== "synthetic-user") return;
+
+      const sessionId = sessionIdFromMessages(output);
+      if (!sessionId) {
+        logger.debug("messagesTransform: no sessionID on messages, skip");
+        return;
+      }
+
+      const context = await ensureTurnRecall(sessionId);
+      if (!context) return;
+
+      const ok = applyContextToLatestUserMessage(output, context);
+      if (ok) {
+        logger.debug(
+          `Injected per-turn recall as synthetic user part for session ${sessionId}`
+        );
+      } else {
+        logger.debug(`messagesTransform: no user message to attach synthetic part`);
+      }
+    } catch (e) {
+      logger.error("Messages transform hook error", e);
     }
   };
 
@@ -436,5 +515,6 @@ export function createHooks(
     dispose,
     "experimental.session.compacting": compacting,
     "experimental.chat.system.transform": systemTransform,
+    "experimental.chat.messages.transform": messagesTransform,
   };
 }

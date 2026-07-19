@@ -25,6 +25,12 @@ export interface HindsightConfig {
   recallMaxQueryChars: number;
   /** Skip auto-recall when the latest user prompt is shorter than this (Claude Code: 5). */
   minRecallPromptChars: number;
+  /**
+   * Where to inject recalled memories:
+   * - system: fold into system[0] (default; most provider-safe)
+   * - synthetic-user: append synthetic text part on latest user message (Claude-like hidden context experiment)
+   */
+  recallInjectMode: "system" | "synthetic-user";
   recallPromptPreamble: string;
   recallTags: string[];
   recallTagsMatch: "any" | "all" | "any_strict" | "all_strict";
@@ -69,6 +75,7 @@ const DEFAULTS: HindsightConfig = {
   recallContextTurns: 1,
   recallMaxQueryChars: 800,
   minRecallPromptChars: 5,
+  recallInjectMode: "system",
   recallTags: [],
   recallTagsMatch: "any",
   recallPromptPreamble:
@@ -124,6 +131,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_RECALL_MAX_QUERY_CHARS: ["recallMaxQueryChars", "int"],
   HINDSIGHT_RECALL_CONTEXT_TURNS: ["recallContextTurns", "int"],
   HINDSIGHT_MIN_RECALL_PROMPT_CHARS: ["minRecallPromptChars", "int"],
+  HINDSIGHT_RECALL_INJECT_MODE: ["recallInjectMode", "string"],
   HINDSIGHT_DYNAMIC_BANK_ID: ["dynamicBankId", "bool"],
   HINDSIGHT_BANK_MISSION: ["bankMission", "string"],
   HINDSIGHT_BANK_ID_PREFIX: ["bankIdPrefix", "string"],
@@ -242,6 +250,15 @@ export function loadConfig(pluginOptions?: Record<string, unknown>): HindsightCo
         `valid: ${VALID_BUDGETS.join(", ")}. Falling back to "mid".`
     );
     result.recallBudget = "mid";
+  }
+
+  const VALID_INJECT_MODES = ["system", "synthetic-user"];
+  if (!VALID_INJECT_MODES.includes(result.recallInjectMode)) {
+    console.error(
+      `[Hindsight] Unknown recallInjectMode "${result.recallInjectMode}" — ` +
+        `valid: ${VALID_INJECT_MODES.join(", ")}. Falling back to "system".`
+    );
+    result.recallInjectMode = "system";
   }
 
   return result;

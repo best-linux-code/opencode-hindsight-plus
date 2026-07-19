@@ -51,6 +51,7 @@ describe("createHooks", () => {
     expect(hooks.event).toBeDefined();
     expect(hooks["experimental.session.compacting"]).toBeDefined();
     expect(hooks["experimental.chat.system.transform"]).toBeDefined();
+    expect(hooks["experimental.chat.messages.transform"]).toBeDefined();
   });
 });
 
@@ -691,5 +692,145 @@ describe("system transform hook — per-turn recall (Claude Code aligned)", () =
     const query = client.recall.mock.calls[0][1] as string;
     expect(query).toContain("Prior context:");
     expect(query).toContain("What database did we choose?");
+  });
+
+  it("skips system inject when recallInjectMode is synthetic-user", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "Should not go to system", type: "observation" }],
+    });
+    const output = { system: ["base"] as string[] };
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user" }),
+      makeState(),
+      makeOpencodeClient([userMsg("What is our deploy target?")])
+    );
+
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "sess-1", model: {} },
+      output
+    );
+
+    expect(client.recall).not.toHaveBeenCalled();
+    expect(output.system[0]).toBe("base");
+  });
+});
+
+describe("messages transform — synthetic-user inject", () => {
+  it("appends synthetic hindsight part on latest user message", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "Deploy on Fly.io", type: "observation" }],
+    });
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user" }),
+      makeState(),
+      makeOpencodeClient([userMsg("Where do we deploy?")])
+    );
+
+    const output = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "Where do we deploy?" }],
+        },
+      ],
+    };
+
+    await hooks["experimental.chat.messages.transform"]({}, output);
+
+    expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(output.messages[0].parts.length).toBe(2);
+    const syn = output.messages[0].parts[1];
+    expect(syn.synthetic).toBe(true);
+    expect(syn.text).toContain("hindsight_memories");
+    expect(syn.text).toContain("Fly.io");
+  });
+
+  it("replaces previous synthetic hindsight part instead of stacking", async () => {
+    const client = makeClient();
+    client.recall
+      .mockResolvedValueOnce({ results: [{ text: "Old", type: "observation" }] })
+      .mockResolvedValueOnce({ results: [{ text: "New", type: "observation" }] });
+    const opencodeClient = makeOpencodeClient([userMsg("Topic one about alpha")]);
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user" }),
+      makeState(),
+      opencodeClient
+    );
+
+    const output1 = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "Topic one about alpha" }],
+        },
+      ],
+    };
+    await hooks["experimental.chat.messages.transform"]({}, output1);
+
+    opencodeClient.session.messages.mockResolvedValue({
+      data: [
+        userMsg("Topic one about alpha"),
+        assistantMsg("ok"),
+        userMsg("Topic two about beta"),
+      ],
+    });
+
+    const output2 = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [
+            { type: "text", text: "Topic two about beta" },
+            {
+              type: "text",
+              text: output1.messages[0].parts[1].text,
+              synthetic: true,
+            },
+          ],
+        },
+      ],
+    };
+    await hooks["experimental.chat.messages.transform"]({}, output2);
+
+    const memParts = output2.messages[0].parts.filter(
+      (p) => typeof p.text === "string" && p.text.includes("<hindsight_memories>")
+    );
+    expect(memParts.length).toBe(1);
+    expect(memParts[0].text).toContain("New");
+    expect(memParts[0].text).not.toContain("Old");
+    expect(memParts[0].synthetic).toBe(true);
+  });
+
+  it("does nothing in system inject mode", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "x", type: "observation" }],
+    });
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "system" }),
+      makeState(),
+      makeOpencodeClient([userMsg("hello there friend")])
+    );
+    const output = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "hello there friend" }],
+        },
+      ],
+    };
+    await hooks["experimental.chat.messages.transform"]({}, output);
+    expect(client.recall).not.toHaveBeenCalled();
+    expect(output.messages[0].parts.length).toBe(1);
   });
 });

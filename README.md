@@ -7,7 +7,7 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 ## Features
 
 - **Custom tools**: `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` — the agent calls these explicitly
-- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment) and injects `<hindsight_memories>` into the system prompt. Tool-loop model calls re-use the same turn's cache (no extra API call).
+- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default inject into `system[0]`; optional experimental `recallInjectMode: "synthetic-user"` appends a `synthetic: true` text part on the latest user message (closer to Claude `additionalContext`). Tool-loop reuses the turn cache.
 - **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment) and stores to Hindsight
 - **SessionEnd flush**: Force-retains any pending turns on `session.deleted` and plugin `dispose` (Claude Code `SessionEnd` alignment), even when under `retainEveryNTurns`
 - **Tool trajectory retain**: When `retainToolCalls` is true (default), tool call inputs/outputs are included in retained transcripts (skips `hindsight_*` tools to avoid feedback loops)
@@ -125,6 +125,7 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated retain tags (templates supported)      | `{session_id}`                     |
 | `HINDSIGHT_USER_ID`           | Used by `{user_id}` template in retain tags/metadata   | (empty)                            |
 | `HINDSIGHT_ENABLE_KNOWLEDGE_PAGES` | Register `hindsight_page_*` tools                 | `true`                             |
+| `HINDSIGHT_RECALL_INJECT_MODE` | `system` or `synthetic-user` (experimental)          | `system`                           |
 | `HINDSIGHT_RECALL_TAGS`       | Comma-separated, filter recalls                          | (none)                                |
 | `HINDSIGHT_RECALL_TAGS_MATCH` | Tag match mode: `any`, `all`, `any_strict`, `all_strict` | `any`                                 |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated, added to every retain                   | (none)                                |

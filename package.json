@@ -1,7 +1,7 @@
 {
   "name": "opencode-hindsight-plus",
-  "version": "0.3.4",
-  "description": "Hindsight memory plugin for OpenCode with per-project banks, per-turn recall, knowledge pages, and SessionEnd flush",
+  "version": "0.3.5",
+  "description": "Hindsight memory plugin for OpenCode with per-project banks, per-turn recall, optional synthetic-user inject, knowledge pages",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
