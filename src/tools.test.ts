@@ -116,7 +116,9 @@ describe("createTools", () => {
       expect(client.recall).toHaveBeenCalledWith("test-bank", "user preferences", {
         budget: "mid",
         maxTokens: 1024,
-        types: ["world", "experience"],
+        types: ["observation"],
+        tags: undefined,
+        tagsMatch: undefined,
       });
       expect(result).toContain("User likes Python");
       expect(result).toContain("[world]");
@@ -148,7 +150,9 @@ describe("createTools", () => {
       expect(client.recall).toHaveBeenCalledWith("test-bank", "test", {
         budget: "high",
         maxTokens: 4096,
-        types: ["world", "experience"],
+        types: ["observation"],
+        tags: undefined,
+        tagsMatch: undefined,
       });
     });
   });

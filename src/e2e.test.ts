@@ -13,7 +13,7 @@
  *   - A reachable Hindsight server (defaults to http://127.0.0.1:8888).
  *   - When pointing at the hosted backend: HINDSIGHT_API_TOKEN with a valid key.
  */
-import { afterAll, beforeAll, describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 
 import { HindsightPlugin } from "./index.js";
@@ -21,7 +21,11 @@ import { HindsightClient } from "@vectorize-io/hindsight-client";
 
 const LIVE = process.env.HINDSIGHT_LIVE_E2E === "1";
 const URL = process.env.HINDSIGHT_API_URL || "http://127.0.0.1:8888";
-const BANK = `e2e-opencode-${randomBytes(4).toString("hex")}`;
+const EXTRACTION_MS = 10_000;
+
+function newBank(label: string): string {
+  return `e2e-opencode-${label}-${randomBytes(3).toString("hex")}`;
+}
 
 function mockOpencodeSessionMessages(messages: Array<{ role: string; content: string }>) {
   return {
@@ -41,27 +45,34 @@ function mockOpencodeSessionMessages(messages: Array<{ role: string; content: st
 const describeLive = LIVE ? describe : describe.skip;
 
 describeLive("live: OpenCode plugin against Hindsight", () => {
-  // When pointing at the hosted backend, the suite's direct (non-plugin)
-  // retain/recall/deleteBank calls need the same token the plugin reads from
-  // HINDSIGHT_API_TOKEN — otherwise they 401 even when the plugin path is fine.
   const TOKEN = process.env.HINDSIGHT_API_TOKEN;
   const client = new HindsightClient(TOKEN ? { baseUrl: URL, apiKey: TOKEN } : { baseUrl: URL });
+  const banks: string[] = [];
+
+  function trackBank(label: string): string {
+    const id = newBank(label);
+    banks.push(id);
+    return id;
+  }
 
   afterAll(async () => {
-    try {
-      await client.deleteBank(BANK);
-    } catch {
-      // bank may not exist if a test bailed early; harmless
+    for (const bank of banks) {
+      try {
+        await client.deleteBank(bank);
+      } catch {
+        // bank may not exist if a test bailed early
+      }
     }
   });
 
   it("retain → server-side extraction → recall via tools surfaces the stored fact", async () => {
+    const bank = trackBank("tools");
     const plugin = await HindsightPlugin(
       {
         client: mockOpencodeSessionMessages([]) as any,
         directory: "/tmp/fake-project",
       } as any,
-      { hindsightApiUrl: URL, bankId: BANK, debug: false }
+      { hindsightApiUrl: URL, bankId: bank, debug: false }
     );
 
     const retainOut = await plugin.tool!.hindsight_retain.execute(
@@ -70,17 +81,17 @@ describeLive("live: OpenCode plugin against Hindsight", () => {
     );
     expect(String(retainOut)).toMatch(/stored/i);
 
-    // Server-side fact extraction is asynchronous; give it time before recall.
-    await new Promise((r) => setTimeout(r, 6000));
+    await new Promise((r) => setTimeout(r, EXTRACTION_MS));
 
     const recallOut = await plugin.tool!.hindsight_recall.execute(
       { query: "favourite programming language" } as any,
       {} as any
     );
     expect(String(recallOut).toLowerCase()).toContain("haskell");
-  }, 30_000);
+  }, 45_000);
 
   it("session.idle → auto-retain captures the transcript", async () => {
+    const bank = trackBank("idle");
     const sessionId = "idle-test-session";
     const fakeMessages = [
       { role: "user", content: "I prefer dark mode and use VS Code." },
@@ -94,7 +105,7 @@ describeLive("live: OpenCode plugin against Hindsight", () => {
       } as any,
       {
         hindsightApiUrl: URL,
-        bankId: BANK,
+        bankId: bank,
         retainEveryNTurns: 1,
         debug: false,
       }
@@ -104,50 +115,48 @@ describeLive("live: OpenCode plugin against Hindsight", () => {
       event: { type: "session.idle", properties: { sessionID: sessionId } },
     } as any);
 
-    // Give the auto-retain RPC and the server-side extraction time to land.
-    await new Promise((r) => setTimeout(r, 6000));
+    await new Promise((r) => setTimeout(r, EXTRACTION_MS));
 
-    const direct = await client.recall(BANK, "IDE preferences");
+    const direct = await client.recall(bank, "dark mode VS Code preferences", {
+      types: ["observation", "world", "experience"],
+      budget: "mid",
+      maxTokens: 1024,
+    });
     const texts = (direct.results || []).map((r) => r.text.toLowerCase()).join(" | ");
     expect(texts).toMatch(/vs code|dark mode/);
-  }, 30_000);
+  }, 45_000);
 
-  it("session.created + system transform injects recalled context on first prompt", async () => {
-    const sessionId = "first-prompt-session";
+  it("per-turn system transform injects memories relevant to the user prompt", async () => {
+    const bank = trackBank("per-turn");
+    const sessionId = "per-turn-prompt-session";
 
-    // Seed with content that matches the hardcoded system-transform query
-    // ("project context and recent work").
     await client.retain(
-      BANK,
-      "Project context: TypeScript monorepo; recent work was on the hindsight-opencode plugin's Cloud-default config."
+      bank,
+      "The team's preferred deployment target is Fly.io for the hindsight-opencode plugin."
     );
-    // Give the server-side extraction time to index the new content.
-    await new Promise((r) => setTimeout(r, 6000));
+    await new Promise((r) => setTimeout(r, EXTRACTION_MS));
 
     const plugin = await HindsightPlugin(
       {
-        client: mockOpencodeSessionMessages([]) as any,
+        client: mockOpencodeSessionMessages([
+          {
+            role: "user",
+            content: "Where should we deploy the hindsight-opencode plugin?",
+          },
+        ]) as any,
         directory: "/tmp/fake-project",
       } as any,
-      { hindsightApiUrl: URL, bankId: BANK, debug: false }
+      { hindsightApiUrl: URL, bankId: bank, debug: false }
     );
 
-    // First, session.created → marks the session as awaiting first-prompt recall
-    await plugin.event!({
-      event: {
-        type: "session.created",
-        properties: { info: { id: sessionId, title: "t" } },
-      },
-    } as any);
-
-    // Then system.transform should inject (bank has matching project context).
-    const sysOut = { system: [] as string[] };
+    const sysOut = { system: ["You are a coding agent."] as string[] };
     await plugin["experimental.chat.system.transform"]!(
       { sessionID: sessionId, model: {} } as any,
       sysOut
     );
 
-    expect(sysOut.system.length).toBeGreaterThan(0);
-    expect(sysOut.system.join("\n")).toMatch(/hindsight_memories/);
-  }, 30_000);
+    expect(sysOut.system.length).toBe(1);
+    expect(sysOut.system[0]).toMatch(/hindsight_memories/);
+    expect(sysOut.system[0].toLowerCase()).toMatch(/fly\.io|deploy/);
+  }, 45_000);
 });

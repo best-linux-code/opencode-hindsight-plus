@@ -110,30 +110,41 @@ describe("HindsightPlugin state sharing", () => {
     vi.clearAllMocks();
   });
 
-  it("shares state across multiple plugin instantiations (sessions)", async () => {
+  it("shares turn-recall cache across plugin instantiations (sessions)", async () => {
     process.env.HINDSIGHT_API_URL = "http://localhost:8888";
 
-    // Simulate two sessions calling the plugin (OpenCode instantiates per session)
-    const result1 = await HindsightPlugin(mockPluginInput as any);
-    const result2 = await HindsightPlugin(mockPluginInput as any);
+    const messagesClient = {
+      session: {
+        messages: vi.fn().mockResolvedValue({
+          data: [
+            {
+              info: { role: "user" },
+              parts: [{ type: "text", text: "Shared-state recall query" }],
+            },
+          ],
+        }),
+      },
+    };
 
-    // Trigger session.created on session 1 — should track 'sess-A'
-    await result1.event!({
-      event: { type: "session.created", properties: { info: { id: "sess-A" } } },
-    });
+    const input1 = { ...mockPluginInput, client: messagesClient };
+    const input2 = { ...mockPluginInput, client: messagesClient };
 
-    // Session 2's system transform should see 'sess-A' because state is shared
-    const output = { system: [] as string[] };
+    const result1 = await HindsightPlugin(input1 as any);
+    const result2 = await HindsightPlugin(input2 as any);
+
+    await result1["experimental.chat.system.transform"]!(
+      { sessionID: "sess-A", model: {} },
+      { system: [] }
+    );
+    const client0 = (HindsightClient as any).mock.instances[0];
+    expect(client0.recall).toHaveBeenCalledTimes(1);
+
     await result2["experimental.chat.system.transform"]!(
       { sessionID: "sess-A", model: {} },
-      output
+      { system: ["base"] }
     );
-
-    // The recall was attempted (state was shared — sess-A was found in recalledSessions).
-    // If state were per-instance, result2 would have an empty recalledSessions and skip recall.
-    // result2 uses the second HindsightClient instance (index 1).
-    const clientInstance = (HindsightClient as any).mock.instances[1];
-    expect(clientInstance.recall).toHaveBeenCalled();
+    const client1 = (HindsightClient as any).mock.instances[1];
+    expect(client1.recall).not.toHaveBeenCalled();
   });
 });
 

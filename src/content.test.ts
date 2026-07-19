@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   stripMemoryTags,
+  injectHindsightMemories,
   formatMemories,
   formatCurrentTime,
   composeRecallQuery,
@@ -28,6 +29,24 @@ describe("stripMemoryTags", () => {
 
   it("returns unchanged if no tags", () => {
     expect(stripMemoryTags("hello world")).toBe("hello world");
+  });
+});
+
+describe("injectHindsightMemories", () => {
+  it("appends a block to an empty system section", () => {
+    const block = "<hindsight_memories>\nA\n</hindsight_memories>";
+    expect(injectHindsightMemories("", block)).toBe(block);
+  });
+
+  it("replaces an existing block instead of stacking", () => {
+    const oldBlock = "<hindsight_memories>\nold\n</hindsight_memories>";
+    const newBlock = "<hindsight_memories>\nnew\n</hindsight_memories>";
+    const system = `You are helpful.\n\n${oldBlock}`;
+    const result = injectHindsightMemories(system, newBlock);
+    expect(result).toContain("You are helpful.");
+    expect(result).toContain("new");
+    expect(result).not.toContain("old");
+    expect((result.match(/<hindsight_memories>/g) || []).length).toBe(1);
   });
 });
 

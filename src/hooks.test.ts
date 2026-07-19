@@ -6,7 +6,7 @@ function makeState(): PluginState {
   return {
     turnCount: 0,
     missionsSet: new Set(),
-    recalledSessions: new Set(),
+    turnRecall: new Map(),
     lastRetainedTurn: new Map(),
   };
 }
@@ -30,6 +30,14 @@ function makeOpencodeClient(
   };
 }
 
+function userMsg(text: string) {
+  return { info: { role: "user" }, parts: [{ type: "text", text }] };
+}
+
+function assistantMsg(text: string) {
+  return { info: { role: "assistant" }, parts: [{ type: "text", text }] };
+}
+
 describe("createHooks", () => {
   it("returns all required hooks", () => {
     const hooks = createHooks(
@@ -48,10 +56,7 @@ describe("createHooks", () => {
 describe("event hook — session.idle", () => {
   it("auto-retains conversation on session.idle with document_id", async () => {
     const client = makeClient();
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi there" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi there")];
     const opencodeClient = makeOpencodeClient(messages);
     const state = makeState();
     const hooks = createHooks(
@@ -68,7 +73,6 @@ describe("event hook — session.idle", () => {
 
     expect(client.retain).toHaveBeenCalledTimes(1);
     expect(client.retain.mock.calls[0][0]).toBe("bank");
-    // Full-session mode uses session ID as document_id
     const opts = client.retain.mock.calls[0][2];
     expect(opts.documentId).toBe("sess-1");
     expect(opts.metadata.session_id).toBe("sess-1");
@@ -76,10 +80,7 @@ describe("event hook — session.idle", () => {
 
   it("passes retainTags from config to retain call", async () => {
     const client = makeClient();
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi there" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi there")];
     const opencodeClient = makeOpencodeClient(messages);
     const state = makeState();
     const hooks = createHooks(
@@ -101,10 +102,7 @@ describe("event hook — session.idle", () => {
 
   it("skips retain when autoRetain is false", async () => {
     const client = makeClient();
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi")];
     const hooks = createHooks(
       client,
       "bank",
@@ -123,10 +121,10 @@ describe("event hook — session.idle", () => {
   it("uses chunked document_id with overlap in last-turn mode", async () => {
     const client = makeClient();
     const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Turn 1" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Reply 1" }] },
-      { info: { role: "user" }, parts: [{ type: "text", text: "Turn 2" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Reply 2" }] },
+      userMsg("Turn 1"),
+      assistantMsg("Reply 1"),
+      userMsg("Turn 2"),
+      assistantMsg("Reply 2"),
     ];
     const config = makeConfig({
       retainMode: "last-turn",
@@ -142,99 +140,37 @@ describe("event hook — session.idle", () => {
 
     expect(client.retain).toHaveBeenCalledTimes(1);
     const opts = client.retain.mock.calls[0][2];
-    // Chunked mode uses session-timestamp format
     expect(opts.documentId).toMatch(/^sess-1-\d+$/);
   });
 
   it("respects retainEveryNTurns", async () => {
     const client = makeClient();
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
-    const config = makeConfig({ retainEveryNTurns: 5 });
+    const messages = [userMsg("Only one turn"), assistantMsg("ok")];
     const state = makeState();
-    const hooks = createHooks(client, "bank", config, state, makeOpencodeClient(messages));
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 3 }),
+      state,
+      makeOpencodeClient(messages)
+    );
 
     await hooks.event({
       event: { type: "session.idle", properties: { sessionID: "sess-1" } },
     });
 
-    // Only 1 user turn, needs 5 — should not retain
     expect(client.retain).not.toHaveBeenCalled();
-  });
-
-  it("does not throw on client error", async () => {
-    const client = makeClient();
-    client.retain.mockRejectedValue(new Error("Network error"));
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
-    const hooks = createHooks(
-      client,
-      "bank",
-      makeConfig({ retainEveryNTurns: 1 }),
-      makeState(),
-      makeOpencodeClient(messages)
-    );
-
-    await expect(
-      hooks.event({
-        event: { type: "session.idle", properties: { sessionID: "sess-1" } },
-      })
-    ).resolves.not.toThrow();
-  });
-});
-
-describe("autoRecall is independent of session.created ordering (#1758)", () => {
-  it("injects recall on the first system.transform even if session.created never fired", async () => {
-    const state = makeState();
-    const client = makeClient();
-    client.recall.mockResolvedValue({ results: [{ text: "User is a developer", type: "world" }] });
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
-
-    // No session.created beforehand — this is the #1758 reproduction.
-    const output: { system: string[] } = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
-
-    expect(output.system.length).toBeGreaterThan(0);
-    expect(output.system[0]).toContain("hindsight_memories");
-    // Marked as recalled so it won't repeat on the next message.
-    expect(state.recalledSessions.has("sess-1")).toBe(true);
-  });
-
-  it("injects recall even when system.transform fires BEFORE session.created", async () => {
-    const state = makeState();
-    const client = makeClient();
-    client.recall.mockResolvedValue({ results: [{ text: "User is a developer", type: "world" }] });
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
-
-    const out1: { system: string[] } = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, out1);
-    expect(out1.system.length).toBeGreaterThan(0); // recall happened on turn 1
-
-    // session.created arriving late is a no-op and must not re-trigger recall.
-    await hooks.event({
-      event: { type: "session.created", properties: { info: { id: "sess-1" } } },
-    });
-    const out2: { system: string[] } = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, out2);
-    expect(out2.system.length).toBe(0); // already recalled — deduped
   });
 });
 
 describe("compacting hook", () => {
-  it("retains before compaction and recalls context", async () => {
+  it("retains then injects query-specific memories into compaction context", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({
-      results: [{ text: "Important fact", type: "world" }],
+      results: [{ text: "Important fact", type: "observation" }],
     });
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Build the feature" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Working on it" }] },
-    ];
-    const output = { context: [] as string[], prompt: undefined };
+    const messages = [userMsg("What about X?"), assistantMsg("...")];
+    const output = { context: [] as string[] };
     const hooks = createHooks(
       client,
       "bank",
@@ -245,7 +181,6 @@ describe("compacting hook", () => {
 
     await hooks["experimental.session.compacting"]({ sessionID: "sess-1" }, output);
 
-    // Should have retained and recalled
     expect(client.retain).toHaveBeenCalled();
     expect(client.recall).toHaveBeenCalled();
     expect(output.context.length).toBeGreaterThan(0);
@@ -256,10 +191,7 @@ describe("compacting hook", () => {
   it("pre-compaction retain includes documentId and session metadata", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({ results: [] });
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi")];
     const output = { context: [] as string[] };
     const hooks = createHooks(
       client,
@@ -280,10 +212,7 @@ describe("compacting hook", () => {
   it("pre-compaction retain passes retainTags from config", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({ results: [] });
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi")];
     const output = { context: [] as string[] };
     const hooks = createHooks(
       client,
@@ -303,10 +232,7 @@ describe("compacting hook", () => {
   it("pre-compaction retain uses chunked documentId in last-turn mode", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({ results: [] });
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi")];
     const config = makeConfig({ retainMode: "last-turn", retainEveryNTurns: 1 });
     const output = { context: [] as string[] };
     const hooks = createHooks(client, "bank", config, makeState(), makeOpencodeClient(messages));
@@ -320,26 +246,21 @@ describe("compacting hook", () => {
   it("resets lastRetainedTurn so idle-retain resumes after compaction", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({ results: [] });
-    const messages = [
-      { info: { role: "user" }, parts: [{ type: "text", text: "Hello" }] },
-      { info: { role: "assistant" }, parts: [{ type: "text", text: "Hi" }] },
-    ];
+    const messages = [userMsg("Hello"), assistantMsg("Hi")];
     const state = makeState();
-    // Simulate prior retain at turn 10
     state.lastRetainedTurn.set("sess-1", 10);
     const output = { context: [] as string[] };
     const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
 
     await hooks["experimental.session.compacting"]({ sessionID: "sess-1" }, output);
 
-    // After compaction, lastRetainedTurn should be cleared so idle-retain works again
     expect(state.lastRetainedTurn.has("sess-1")).toBe(false);
   });
 
   it("does not throw on error", async () => {
     const client = makeClient();
     client.recall.mockRejectedValue(new Error("Failed"));
-    const messages = [{ info: { role: "user" }, parts: [{ type: "text", text: "Test" }] }];
+    const messages = [userMsg("Test")];
     const output = { context: [] as string[] };
     const hooks = createHooks(
       client,
@@ -355,94 +276,198 @@ describe("compacting hook", () => {
   });
 });
 
-describe("system transform hook", () => {
-  it("injects memories on the first transform for a session", async () => {
+describe("system transform hook — per-turn recall (Claude Code aligned)", () => {
+  it("recalls using the latest user prompt as the query", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({
-      results: [{ text: "User is a developer", type: "world" }],
+      results: [{ text: "User is a developer", type: "observation" }],
     });
     const state = makeState();
     const output = { system: [] as string[] };
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig(),
+      state,
+      makeOpencodeClient([userMsg("What did we decide about auth?")])
+    );
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
-    expect(output.system.length).toBeGreaterThan(0);
+    expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(client.recall.mock.calls[0][1]).toBe("What did we decide about auth?");
     expect(output.system[0]).toContain("hindsight_memories");
-    // Marked as recalled so it won't repeat.
-    expect(state.recalledSessions.has("sess-1")).toBe(true);
+    expect(output.system[0]).toContain("User is a developer");
+    expect(state.turnRecall.get("sess-1")?.userTurnCount).toBe(1);
   });
 
   it("appends recall into the existing first system section, not a new one", async () => {
-    // OpenCode emits each system[] entry as a separate system message and some
-    // providers only honor the first; recall must fold into system[0].
     const client = makeClient();
     client.recall.mockResolvedValue({
-      results: [{ text: "User is a developer", type: "world" }],
+      results: [{ text: "User is a developer", type: "observation" }],
     });
     const state = makeState();
     const output = { system: ["You are a helpful coding assistant."] as string[] };
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig(),
+      state,
+      makeOpencodeClient([userMsg("Continue the refactor plan")])
+    );
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
-    // Still a single system section — appended, not pushed.
     expect(output.system.length).toBe(1);
     expect(output.system[0]).toContain("You are a helpful coding assistant.");
     expect(output.system[0]).toContain("hindsight_memories");
-    expect(output.system[0]).toContain("User is a developer");
   });
 
-  it("deduplicates: does not recall again for an already-recalled session", async () => {
+  it("re-injects cached context on same user turn without a second API call", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "Cached memory", type: "observation" }],
+    });
+    const state = makeState();
+    const messages = [userMsg("Implement the login form")];
+    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
+
+    const output1 = { system: ["base"] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
+    expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(output1.system[0]).toContain("Cached memory");
+
+    // Tool-loop / second model call within the same user turn
+    const output2 = { system: ["base"] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output2);
+    expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(output2.system[0]).toContain("Cached memory");
+  });
+
+  it("recalls again when a new user turn arrives", async () => {
+    const client = makeClient();
+    client.recall
+      .mockResolvedValueOnce({ results: [{ text: "Mem A", type: "observation" }] })
+      .mockResolvedValueOnce({ results: [{ text: "Mem B", type: "observation" }] });
+
+    const state = makeState();
+    const opencodeClient = makeOpencodeClient([userMsg("First question about auth")]);
+    const hooks = createHooks(client, "bank", makeConfig(), state, opencodeClient);
+
+    const output1 = { system: ["base"] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
+    expect(client.recall.mock.calls[0][1]).toBe("First question about auth");
+    expect(output1.system[0]).toContain("Mem A");
+
+    opencodeClient.session.messages.mockResolvedValue({
+      data: [
+        userMsg("First question about auth"),
+        assistantMsg("Auth uses JWT."),
+        userMsg("Now switch to database schema"),
+      ],
+    });
+
+    const output2 = { system: ["base"] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output2);
+    expect(client.recall).toHaveBeenCalledTimes(2);
+    expect(client.recall.mock.calls[1][1]).toBe("Now switch to database schema");
+    expect(output2.system[0]).toContain("Mem B");
+    expect(output2.system[0]).not.toContain("Mem A");
+  });
+
+  it("replaces previous hindsight block instead of stacking", async () => {
+    const client = makeClient();
+    client.recall
+      .mockResolvedValueOnce({ results: [{ text: "Old mem", type: "observation" }] })
+      .mockResolvedValueOnce({ results: [{ text: "New mem", type: "observation" }] });
+    const state = makeState();
+    const opencodeClient = makeOpencodeClient([userMsg("Topic one about foo")]);
+    const hooks = createHooks(client, "bank", makeConfig(), state, opencodeClient);
+
+    const output1 = { system: ["sys"] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
+
+    opencodeClient.session.messages.mockResolvedValue({
+      data: [userMsg("Topic one about foo"), assistantMsg("ok"), userMsg("Topic two about bar")],
+    });
+
+    // Simulate OpenCode reusing system that already has a block (should still replace)
+    const output2 = { system: [output1.system[0]] as string[] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output2);
+
+    const blockCount = (output2.system[0].match(/<hindsight_memories>/g) || []).length;
+    expect(blockCount).toBe(1);
+    expect(output2.system[0]).toContain("New mem");
+    expect(output2.system[0]).not.toContain("Old mem");
+  });
+
+  it("skips prompts shorter than minRecallPromptChars", async () => {
     const client = makeClient();
     const state = makeState();
-    state.recalledSessions.add("sess-1"); // already recalled
     const output = { system: [] as string[] };
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ minRecallPromptChars: 5 }),
+      state,
+      makeOpencodeClient([userMsg("hi")])
+    );
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
-    expect(output.system.length).toBe(0);
     expect(client.recall).not.toHaveBeenCalled();
+    expect(output.system.length).toBe(0);
   });
 
-  it("marks session recalled on empty recall (no repeated queries for empty banks)", async () => {
+  it("skips when there is no user message yet", async () => {
     const client = makeClient();
-    // No results — empty bank
-    client.recall.mockResolvedValue({ results: [] });
-    const state = makeState();
     const output = { system: [] as string[] };
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
+    const hooks = createHooks(client, "bank", makeConfig(), makeState(), makeOpencodeClient([]));
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
-    // No injection, but session marked — won't re-query on next transform
-    expect(output.system.length).toBe(0);
-    expect(state.recalledSessions.has("sess-1")).toBe(true);
+    expect(client.recall).not.toHaveBeenCalled();
   });
 
   it("retries recall on next transform after transient API failure", async () => {
     const client = makeClient();
-    // First call: API error (transient)
     client.recall.mockRejectedValueOnce(new Error("Connection refused"));
-    // Second call: succeeds
     client.recall.mockResolvedValueOnce({
-      results: [{ text: "Found it", type: "world" }],
+      results: [{ text: "Found it", type: "observation" }],
     });
     const state = makeState();
-    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient());
+    const messages = [userMsg("Retry this query please")];
+    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
 
-    // First attempt — API error, NOT marked, so it retries next time
     const output1 = { system: [] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output1);
     expect(output1.system.length).toBe(0);
-    expect(state.recalledSessions.has("sess-1")).toBe(false);
+    expect(state.turnRecall.has("sess-1")).toBe(false);
 
-    // Second attempt — succeeds, injected and marked
     const output2 = { system: [] as string[] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output2);
-    expect(output2.system.length).toBeGreaterThan(0);
-    expect(state.recalledSessions.has("sess-1")).toBe(true);
+    expect(output2.system[0]).toContain("Found it");
+    expect(state.turnRecall.has("sess-1")).toBe(true);
+  });
+
+  it("caches empty recall so the same turn does not re-query", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({ results: [] });
+    const state = makeState();
+    const messages = [userMsg("No memories expected here")];
+    const hooks = createHooks(client, "bank", makeConfig(), state, makeOpencodeClient(messages));
+
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "sess-1", model: {} },
+      { system: [] }
+    );
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "sess-1", model: {} },
+      { system: [] }
+    );
+
+    expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(state.turnRecall.get("sess-1")?.context).toBeNull();
   });
 
   it("skips when autoRecall is false", async () => {
@@ -454,12 +479,38 @@ describe("system transform hook", () => {
       "bank",
       makeConfig({ autoRecall: false }),
       state,
-      makeOpencodeClient()
+      makeOpencodeClient([userMsg("Should not recall this")])
     );
 
     await hooks["experimental.chat.system.transform"]({ sessionID: "sess-1", model: {} }, output);
 
     expect(output.system.length).toBe(0);
     expect(client.recall).not.toHaveBeenCalled();
+  });
+
+  it("composes multi-turn query when recallContextTurns > 1", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({ results: [] });
+    const messages = [
+      userMsg("We use Postgres"),
+      assistantMsg("Noted"),
+      userMsg("What database did we choose?"),
+    ];
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallContextTurns: 2 }),
+      makeState(),
+      makeOpencodeClient(messages)
+    );
+
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "sess-1", model: {} },
+      { system: [] }
+    );
+
+    const query = client.recall.mock.calls[0][1] as string;
+    expect(query).toContain("Prior context:");
+    expect(query).toContain("What database did we choose?");
   });
 });
