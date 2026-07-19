@@ -88,9 +88,9 @@ const DEFAULTS: HindsightConfig = {
   retainMode: "full-session",
   retainEveryNTurns: 10,
   retainOverlapTurns: 2,
-  // Plus default true: coding agents benefit from tool trajectory memory.
-  // Claude Code ships false; set false here to match Claude exactly.
-  retainToolCalls: true,
+  // Align with Claude Code default (false). Tool transcripts explode fact
+  // extraction / consolidation queues; opt in via config when needed.
+  retainToolCalls: false,
   retainContext: "opencode",
   // Claude Code default shape; templates: {session_id} {bank_id} {timestamp} {user_id}
   retainTags: ["{session_id}"],

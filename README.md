@@ -10,7 +10,7 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 - **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default inject mode is `synthetic-user` (a `synthetic: true` text part on the latest user message, closer to Claude `additionalContext`). Set `recallInjectMode: "system"` to fold into `system[0]` instead. Tool-loop reuses the turn cache.
 - **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment) and stores to Hindsight
 - **SessionEnd flush**: Force-retains any pending turns on `session.deleted` and plugin `dispose` (Claude Code `SessionEnd` alignment), even when under `retainEveryNTurns`
-- **Tool trajectory retain**: When `retainToolCalls` is true (default), tool call inputs/outputs are included in retained transcripts (skips `hindsight_*` tools to avoid feedback loops)
+- **Tool trajectory retain** (opt-in): Set `retainToolCalls: true` to include tool call inputs/outputs in retained transcripts (skips `hindsight_*` tools). Default is `false` (Claude Code-aligned) to avoid fact/consolidation blowups from agent tool noise
 - **Retain tag templates**: `retainTags` / `retainMetadata` support `{session_id}`, `{bank_id}`, `{timestamp}`, `{user_id}` (empty `user:` tags dropped when unset)
 - **Coding-oriented bank missions**: default `bankMission` / `retainMission` guide fact extraction
 - **Knowledge pages**: `hindsight_page_*` tools (Hindsight mental-models; Claude `agent_knowledge_*` equivalent). Create long-lived pages with a `source_query` that re-synthesizes after consolidations.
@@ -121,7 +121,7 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_RECALL_BUDGET`     | Recall budget: `low`, `mid`, `high`                      | `mid`                                 |
 | `HINDSIGHT_RECALL_MAX_TOKENS` | Max tokens for recall results                            | `1024`                                |
 | `HINDSIGHT_MIN_RECALL_PROMPT_CHARS` | Skip auto-recall when user prompt is shorter        | `5`                                   |
-| `HINDSIGHT_RETAIN_TOOL_CALLS` | Include tool call/result parts in retained transcripts | `true`                             |
+| `HINDSIGHT_RETAIN_TOOL_CALLS` | Include tool call/result parts in retained transcripts | `false`                            |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated retain tags (templates supported)      | `{session_id}`                     |
 | `HINDSIGHT_USER_ID`           | Used by `{user_id}` template in retain tags/metadata   | (empty)                            |
 | `HINDSIGHT_ENABLE_KNOWLEDGE_PAGES` | Register `hindsight_page_*` tools                 | `true`                             |
