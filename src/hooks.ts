@@ -20,6 +20,9 @@ import {
   sliceLastTurnsByUserBoundary,
   injectHindsightMemories,
   buildMessageContent,
+  buildRetainTemplateVars,
+  resolveRetainTags,
+  resolveRetainMetadata,
   type Message,
   type ToolPartLike,
 } from "./content.js";
@@ -227,17 +230,19 @@ export function createHooks(
       documentId = `${sessionId}-${Date.now()}`;
     }
 
-    const { transcript } = prepareRetentionTranscript(targetMessages, true);
+    const { transcript, messageCount } = prepareRetentionTranscript(targetMessages, true);
     if (!transcript) return;
+
+    const vars = buildRetainTemplateVars({ sessionId, bankId });
+    const tags = resolveRetainTags(config.retainTags, vars);
+    const metadata = resolveRetainMetadata(config.retainMetadata, vars, messageCount);
 
     await ensureBankMission(hindsightClient, bankId, config, state.missionsSet, logger);
     await hindsightClient.retain(bankId, transcript, {
       documentId,
       context: config.retainContext,
-      tags: config.retainTags.length ? config.retainTags : undefined,
-      metadata: Object.keys(config.retainMetadata).length
-        ? { ...config.retainMetadata, session_id: sessionId }
-        : { session_id: sessionId },
+      tags,
+      metadata,
       async: true,
     });
   }

@@ -83,7 +83,8 @@ const DEFAULTS: HindsightConfig = {
   // Claude Code ships false; set false here to match Claude exactly.
   retainToolCalls: true,
   retainContext: "opencode",
-  retainTags: [],
+  // Claude Code default shape; templates: {session_id} {bank_id} {timestamp} {user_id}
+  retainTags: ["{session_id}"],
   retainMetadata: {},
 
   // Connection
@@ -95,8 +96,12 @@ const DEFAULTS: HindsightConfig = {
   bankIdPrefix: "",
   dynamicBankId: false,
   dynamicBankGranularity: ["agent", "project"],
-  bankMission: "",
-  retainMission: null,
+  bankMission:
+    "You are an OpenCode AI coding agent. Focus on technical discussions, decisions, " +
+    "and context relevant to the user's projects.",
+  retainMission:
+    "Extract technical decisions, architectural choices, user preferences, project context, " +
+    "and people/tool relationships. Ignore routine greetings and transient operational details.",
   agentName: "opencode",
 
   // Misc

@@ -47,11 +47,11 @@ describe("createTools", () => {
         mockContext
       );
 
-      expect(client.retain).toHaveBeenCalledWith("test-bank", "User likes TypeScript", {
-        context: "opencode",
-        tags: undefined,
-        metadata: undefined,
-      });
+      const opts = client.retain.mock.calls[0][2];
+      expect(opts.context).toBe("opencode");
+      expect(opts.tags).toBeUndefined();
+      expect(opts.metadata.session_id).toBe("sess-1");
+      expect(opts.metadata.retained_at).toBeTruthy();
       expect(result).toBe("Memory stored successfully.");
     });
 
@@ -68,32 +68,31 @@ describe("createTools", () => {
         mockContext
       );
 
-      expect(client.retain).toHaveBeenCalledWith("test-bank", "Fact", {
-        context: "from conversation",
-        tags: undefined,
-        metadata: undefined,
-      });
+      const opts = client.retain.mock.calls[0][2];
+      expect(opts.context).toBe("from conversation");
+      expect(opts.metadata.session_id).toBe("sess-1");
     });
 
-    it("includes tags and metadata from config", async () => {
+    it("includes tags and metadata from config with templates", async () => {
       const client = {
         retain: vi.fn().mockResolvedValue({}),
         recall: vi.fn(),
         reflect: vi.fn(),
       } as any;
       const config = makeConfig({
-        retainTags: ["coding"],
-        retainMetadata: { source: "opencode" },
+        retainTags: ["coding", "session:{session_id}"],
+        retainMetadata: { source: "opencode", bank: "{bank_id}" },
       });
       const tools = createTools(client, "test-bank", config);
 
       await tools.hindsight_retain.execute({ content: "Fact" }, mockContext);
 
-      expect(client.retain).toHaveBeenCalledWith("test-bank", "Fact", {
-        context: "opencode",
-        tags: ["coding"],
-        metadata: { source: "opencode" },
-      });
+      const opts = client.retain.mock.calls[0][2];
+      expect(opts.context).toBe("opencode");
+      expect(opts.tags).toEqual(["coding", "session:sess-1"]);
+      expect(opts.metadata.source).toBe("opencode");
+      expect(opts.metadata.bank).toBe("test-bank");
+      expect(opts.metadata.session_id).toBe("sess-1");
     });
   });
 

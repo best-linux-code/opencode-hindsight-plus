@@ -101,6 +101,31 @@ describe("event hook — session.idle", () => {
     expect(opts.tags).toEqual(["user:alice", "shared"]);
   });
 
+  it("resolves retainTags templates including {session_id} and {bank_id}", async () => {
+    const client = makeClient();
+    const messages = [userMsg("Hello"), assistantMsg("Hi there")];
+    const hooks = createHooks(
+      client,
+      "my-bank",
+      makeConfig({
+        retainEveryNTurns: 1,
+        retainTags: ["{session_id}", "bank:{bank_id}"],
+      }),
+      makeState(),
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "sess-xyz" } },
+    });
+
+    const opts = client.retain.mock.calls[0][2];
+    expect(opts.tags).toEqual(["sess-xyz", "bank:my-bank"]);
+    expect(opts.metadata.session_id).toBe("sess-xyz");
+    expect(opts.metadata.retained_at).toBeTruthy();
+    expect(opts.metadata.message_count).toBe("2");
+  });
+
   it("skips retain when autoRetain is false", async () => {
     const client = makeClient();
     const messages = [userMsg("Hello"), assistantMsg("Hi")];

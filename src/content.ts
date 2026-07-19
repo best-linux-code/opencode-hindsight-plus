@@ -234,6 +234,80 @@ export function sliceLastTurnsByUserBoundary(messages: Message[], turns: number)
   return startIndex === -1 ? [...messages] : messages.slice(startIndex);
 }
 
+export interface RetainTemplateVars {
+  session_id: string;
+  bank_id: string;
+  timestamp: string;
+  user_id: string;
+}
+
+export interface ResolveRetainTemplatesInput {
+  sessionId: string;
+  bankId: string;
+  messageCount?: number;
+  userId?: string;
+  now?: Date;
+}
+
+/** Build template vars for retain tags/metadata (Claude Code retain.py). */
+export function buildRetainTemplateVars(input: ResolveRetainTemplatesInput): RetainTemplateVars {
+  const now = input.now ?? new Date();
+  const timestamp = now.toISOString().replace(/\.\d{3}Z$/, "Z");
+  return {
+    session_id: input.sessionId,
+    bank_id: input.bankId,
+    timestamp,
+    user_id: input.userId ?? process.env.HINDSIGHT_USER_ID ?? "",
+  };
+}
+
+export function applyTemplateString(value: string, vars: RetainTemplateVars): string {
+  let out = value;
+  for (const [key, val] of Object.entries(vars) as Array<[keyof RetainTemplateVars, string]>) {
+    out = out.split(`{${key}}`).join(val);
+  }
+  return out;
+}
+
+/**
+ * Resolve retainTags with template vars.
+ * Drops empty tags and tags whose value after `:` is empty (e.g. `user:` when user_id unset).
+ */
+export function resolveRetainTags(
+  rawTags: readonly string[],
+  vars: RetainTemplateVars
+): string[] | undefined {
+  if (!rawTags.length) return undefined;
+  const tags: string[] = [];
+  for (const original of rawTags) {
+    const resolved = applyTemplateString(original, vars).trim();
+    if (!resolved) continue;
+    const colon = resolved.indexOf(":");
+    if (colon !== -1 && resolved.slice(colon + 1) === "") continue;
+    tags.push(resolved);
+  }
+  return tags.length ? tags : undefined;
+}
+
+/** Resolve retainMetadata templates and merge session defaults. */
+export function resolveRetainMetadata(
+  rawMetadata: Record<string, string>,
+  vars: RetainTemplateVars,
+  messageCount?: number
+): Record<string, string> {
+  const metadata: Record<string, string> = {
+    retained_at: vars.timestamp,
+    session_id: vars.session_id,
+  };
+  if (messageCount !== undefined) {
+    metadata.message_count = String(messageCount);
+  }
+  for (const [key, value] of Object.entries(rawMetadata)) {
+    metadata[key] = applyTemplateString(String(value), vars);
+  }
+  return metadata;
+}
+
 /**
  * Format messages into a retention transcript.
  *

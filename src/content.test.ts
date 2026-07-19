@@ -11,6 +11,10 @@ import {
   formatToolPartForRetain,
   buildMessageContent,
   isHindsightOperationalTool,
+  buildRetainTemplateVars,
+  resolveRetainTags,
+  resolveRetainMetadata,
+  applyTemplateString,
 } from "./content.js";
 
 describe("stripMemoryTags", () => {
@@ -50,6 +54,46 @@ describe("injectHindsightMemories", () => {
     expect(result).toContain("new");
     expect(result).not.toContain("old");
     expect((result.match(/<hindsight_memories>/g) || []).length).toBe(1);
+  });
+});
+
+describe("retain tag/metadata templates", () => {
+  const vars = buildRetainTemplateVars({
+    sessionId: "sess-abc",
+    bankId: "my-bank",
+    userId: "alice",
+    now: new Date("2026-07-19T12:00:00.000Z"),
+  });
+
+  it("resolves {session_id} {bank_id} {timestamp} {user_id}", () => {
+    expect(applyTemplateString("session:{session_id}", vars)).toBe("session:sess-abc");
+    expect(applyTemplateString("{bank_id}", vars)).toBe("my-bank");
+    expect(applyTemplateString("{timestamp}", vars)).toBe("2026-07-19T12:00:00Z");
+    expect(applyTemplateString("user:{user_id}", vars)).toBe("user:alice");
+  });
+
+  it("drops empty namespace tags like user: when user_id unset", () => {
+    const emptyUser = buildRetainTemplateVars({
+      sessionId: "s1",
+      bankId: "b1",
+      userId: "",
+      now: new Date("2026-07-19T12:00:00.000Z"),
+    });
+    const tags = resolveRetainTags(["{session_id}", "user:{user_id}", "shared"], emptyUser);
+    expect(tags).toEqual(["s1", "shared"]);
+  });
+
+  it("merges default metadata with templated user metadata", () => {
+    const meta = resolveRetainMetadata(
+      { project: "{bank_id}", who: "user:{user_id}" },
+      vars,
+      4
+    );
+    expect(meta.session_id).toBe("sess-abc");
+    expect(meta.retained_at).toBe("2026-07-19T12:00:00Z");
+    expect(meta.message_count).toBe("4");
+    expect(meta.project).toBe("my-bank");
+    expect(meta.who).toBe("user:alice");
   });
 });
 

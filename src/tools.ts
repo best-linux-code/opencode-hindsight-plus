@@ -9,7 +9,13 @@ import { tool } from "@opencode-ai/plugin/tool";
 import type { ToolDefinition } from "@opencode-ai/plugin/tool";
 import type { HindsightClient } from "@vectorize-io/hindsight-client";
 import type { HindsightConfig } from "./config.js";
-import { formatMemories, formatCurrentTime } from "./content.js";
+import {
+  formatMemories,
+  formatCurrentTime,
+  buildRetainTemplateVars,
+  resolveRetainTags,
+  resolveRetainMetadata,
+} from "./content.js";
 import { ensureBankMission } from "./bank.js";
 import { Logger } from "./logger.js";
 
@@ -43,14 +49,21 @@ export function createTools(
         .optional()
         .describe("Optional context about where this information came from."),
     },
-    async execute(args) {
+    async execute(args, ctx) {
       if (missionsSet) {
         await ensureBankMission(client, bankId, config, missionsSet, logger);
       }
+      const sessionId =
+        ctx && typeof ctx === "object" && typeof (ctx as { sessionID?: unknown }).sessionID === "string"
+          ? (ctx as { sessionID: string }).sessionID
+          : "";
+      const vars = buildRetainTemplateVars({ sessionId, bankId });
+      const tags = resolveRetainTags(config.retainTags, vars);
+      const metadata = resolveRetainMetadata(config.retainMetadata, vars);
       await client.retain(bankId, args.content, {
         context: args.context || config.retainContext,
-        tags: config.retainTags.length ? config.retainTags : undefined,
-        metadata: Object.keys(config.retainMetadata).length ? config.retainMetadata : undefined,
+        tags,
+        metadata,
       });
       return "Memory stored successfully.";
     },
