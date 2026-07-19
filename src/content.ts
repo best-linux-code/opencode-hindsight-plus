@@ -15,6 +15,17 @@ export function stripMemoryTags(content: string): string {
   return content;
 }
 
+/**
+ * Fold a fresh `<hindsight_memories>` block into a system section.
+ * Replaces any previous block so per-turn recall does not stack forever.
+ */
+export function injectHindsightMemories(systemSection: string, context: string): string {
+  const base = stripMemoryTags(systemSection)
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  return base ? `${base}\n\n${context}` : context;
+}
+
 export interface RecallResult {
   text: string;
   type?: string | null;

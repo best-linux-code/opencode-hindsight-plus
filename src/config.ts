@@ -23,6 +23,8 @@ export interface HindsightConfig {
   recallTypes: string[];
   recallContextTurns: number;
   recallMaxQueryChars: number;
+  /** Skip auto-recall when the latest user prompt is shorter than this (Claude Code: 5). */
+  minRecallPromptChars: number;
   recallPromptPreamble: string;
   recallTags: string[];
   recallTagsMatch: "any" | "all" | "any_strict" | "all_strict";
@@ -54,13 +56,15 @@ export interface HindsightConfig {
 }
 
 const DEFAULTS: HindsightConfig = {
-  // Recall
+  // Recall — defaults aligned with Claude Code hindsight-memory plugin
   autoRecall: true,
   recallBudget: "mid",
   recallMaxTokens: 1024,
-  recallTypes: ["world", "experience"],
+  // Observations are consolidated beliefs; reduces duplicate raw facts per turn.
+  recallTypes: ["observation"],
   recallContextTurns: 1,
   recallMaxQueryChars: 800,
+  minRecallPromptChars: 5,
   recallTags: [],
   recallTagsMatch: "any",
   recallPromptPreamble:
@@ -68,10 +72,10 @@ const DEFAULTS: HindsightConfig = {
     "conflicting). Only use memories that are directly useful to continue " +
     "this conversation; ignore the rest:",
 
-  // Retain
+  // Retain — defaults aligned with Claude Code (Stop every N turns)
   autoRetain: true,
   retainMode: "full-session",
-  retainEveryNTurns: 3,
+  retainEveryNTurns: 10,
   retainOverlapTurns: 2,
   retainContext: "opencode",
   retainTags: [],
@@ -107,6 +111,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_RECALL_MAX_TOKENS: ["recallMaxTokens", "int"],
   HINDSIGHT_RECALL_MAX_QUERY_CHARS: ["recallMaxQueryChars", "int"],
   HINDSIGHT_RECALL_CONTEXT_TURNS: ["recallContextTurns", "int"],
+  HINDSIGHT_MIN_RECALL_PROMPT_CHARS: ["minRecallPromptChars", "int"],
   HINDSIGHT_DYNAMIC_BANK_ID: ["dynamicBankId", "bool"],
   HINDSIGHT_BANK_MISSION: ["bankMission", "string"],
   HINDSIGHT_BANK_ID_PREFIX: ["bankIdPrefix", "string"],
