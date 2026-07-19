@@ -160,18 +160,36 @@ Search long-term memory. The agent uses this proactively before answering questi
 
 Generate a synthesized answer from long-term memory. Unlike recall (raw memories), reflect produces a coherent summary.
 
-## Dynamic Bank IDs
+## Dynamic Bank IDs (per-project isolation)
 
-For multi-project setups, enable dynamic bank ID derivation:
+**Default:** `dynamicBankId: true` with `dynamicBankGranularity: ["gitProject"]`.
 
-```bash
-export HINDSIGHT_DYNAMIC_BANK_ID=true
+Each git repository gets its own memory bank (main worktree basename). Linked worktrees of the same repo share one bank. Non-git directories fall back to the working-directory basename.
+
+| Field | Meaning |
+|-------|---------|
+| `gitProject` | Main worktree basename (default) — worktrees share memory |
+| `project` | Working directory basename — worktrees may split |
+| `agent` | `agentName` (default `opencode`) |
+| `channel` / `user` | From `HINDSIGHT_CHANNEL_ID` / `HINDSIGHT_USER_ID` |
+
+Disable isolation (single global bank):
+
+```json
+{
+  "dynamicBankId": false,
+  "bankId": "opencode"
+}
 ```
 
-The bank ID is composed from granularity fields (default: `agent::project`). Supported fields: `agent`, `project`, `gitProject`, `channel`, `user`.
+Or set:
 
-- `project` uses the working directory basename. With this field, separate git worktrees of the same repository end up with different bank IDs because their paths differ.
-- `gitProject` resolves to the main worktree's basename via `git rev-parse --git-common-dir`, so all linked worktrees of the same repository share a single bank. Falls back to the working directory basename when git is unavailable or the directory is not a repo. Use this in place of `project` if you want worktrees to share memory:
+```bash
+export HINDSIGHT_DYNAMIC_BANK_ID=false
+export HINDSIGHT_BANK_ID=opencode
+```
+
+Compose multiple dimensions:
 
 ```json
 {
@@ -180,7 +198,7 @@ The bank ID is composed from granularity fields (default: `agent::project`). Sup
 }
 ```
 
-**Note:** The bank ID is derived once when the plugin loads, from environment variables set before OpenCode starts. These dimensions are process-scoped — they don't change per session within a running OpenCode process. For per-user isolation, set the env vars before launching each user's OpenCode instance:
+**Note:** The bank ID is derived once when the plugin loads for a directory. For per-user isolation, set env vars before launching OpenCode:
 
 ```bash
 export HINDSIGHT_CHANNEL_ID="slack-general"

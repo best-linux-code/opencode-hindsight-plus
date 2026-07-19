@@ -25,7 +25,8 @@ describe("loadConfig", () => {
     expect(config.recallMaxTokens).toBe(1024);
     expect(config.retainContext).toBe("opencode");
     expect(config.agentName).toBe("opencode");
-    expect(config.dynamicBankId).toBe(false);
+    expect(config.dynamicBankId).toBe(true);
+    expect(config.dynamicBankGranularity).toEqual(["gitProject"]);
     expect(config.debug).toBe(false);
     expect(config.hindsightApiUrl).toBe(DEFAULT_HINDSIGHT_API_URL);
     expect(config.hindsightApiToken).toBeNull();

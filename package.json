@@ -1,7 +1,7 @@
 {
   "name": "opencode-hindsight-plus",
-  "version": "0.3.2",
-  "description": "Hindsight memory plugin for OpenCode with Claude Code-aligned per-turn recall, tool retain, SessionEnd flush, and retain tag templates",
+  "version": "0.3.3",
+  "description": "Hindsight memory plugin for OpenCode with per-project banks, per-turn recall, tool retain, and SessionEnd flush",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",

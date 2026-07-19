@@ -82,7 +82,7 @@ export function deriveBankId(config: HindsightConfig, directory: string): string
 
   const fields = config.dynamicBankGranularity?.length
     ? config.dynamicBankGranularity
-    : ["agent", "project"];
+    : ["gitProject"];
 
   for (const f of fields) {
     if (!VALID_FIELDS.has(f)) {

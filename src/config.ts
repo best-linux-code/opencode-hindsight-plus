@@ -91,11 +91,10 @@ const DEFAULTS: HindsightConfig = {
   hindsightApiUrl: DEFAULT_HINDSIGHT_API_URL,
   hindsightApiToken: null,
 
-  // Bank
   bankId: null,
   bankIdPrefix: "",
-  dynamicBankId: false,
-  dynamicBankGranularity: ["agent", "project"],
+  dynamicBankId: true,
+  dynamicBankGranularity: ["gitProject"],
   bankMission:
     "You are an OpenCode AI coding agent. Focus on technical discussions, decisions, " +
     "and context relevant to the user's projects.",

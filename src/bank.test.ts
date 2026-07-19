@@ -27,17 +27,28 @@ describe("deriveBankId", () => {
   });
 
   it("returns default bank name in static mode", () => {
-    expect(deriveBankId(makeConfig(), "/home/user/project")).toBe("opencode");
+    expect(deriveBankId(makeConfig({ dynamicBankId: false }), "/home/user/project")).toBe(
+      "opencode"
+    );
   });
 
   it("returns configured bankId in static mode", () => {
-    const config = makeConfig({ bankId: "my-bank" });
+    const config = makeConfig({ dynamicBankId: false, bankId: "my-bank" });
     expect(deriveBankId(config, "/home/user/project")).toBe("my-bank");
   });
 
   it("adds prefix in static mode", () => {
-    const config = makeConfig({ bankIdPrefix: "dev", bankId: "my-bank" });
+    const config = makeConfig({
+      dynamicBankId: false,
+      bankIdPrefix: "dev",
+      bankId: "my-bank",
+    });
     expect(deriveBankId(config, "/home/user/project")).toBe("dev-my-bank");
+  });
+
+  it("defaults to gitProject isolation (per-repo bank)", () => {
+    mockExec.mockReturnValue("/home/user/my-repo/.git\n");
+    expect(deriveBankId(makeConfig(), "/home/user/my-repo/packages/app")).toBe("my-repo");
   });
 
   it("composes from granularity fields in dynamic mode", () => {
@@ -54,7 +65,8 @@ describe("deriveBankId", () => {
       dynamicBankId: true,
       dynamicBankGranularity: [],
     });
-    expect(deriveBankId(config, "/home/user/proj")).toBe("opencode::proj");
+    // Empty granularity falls back to gitProject → directory basename when not a git repo
+    expect(deriveBankId(config, "/home/user/proj")).toBe("proj");
   });
 
   it("preserves raw special characters", () => {
@@ -171,7 +183,7 @@ describe("deriveBankId", () => {
     });
 
     it("does not invoke git in static mode", () => {
-      const config = makeConfig({ bankId: "fixed" });
+      const config = makeConfig({ dynamicBankId: false, bankId: "fixed" });
       expect(deriveBankId(config, "/home/user/myproj")).toBe("fixed");
       expect(mockExec).not.toHaveBeenCalled();
     });
