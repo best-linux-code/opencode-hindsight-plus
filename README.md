@@ -9,6 +9,8 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 - **Custom tools**: `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` — the agent calls these explicitly
 - **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment) and injects `<hindsight_memories>` into the system prompt. Tool-loop model calls re-use the same turn's cache (no extra API call).
 - **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment) and stores to Hindsight
+- **SessionEnd flush**: Force-retains any pending turns on `session.deleted` and plugin `dispose` (Claude Code `SessionEnd` alignment), even when under `retainEveryNTurns`
+- **Tool trajectory retain**: When `retainToolCalls` is true (default), tool call inputs/outputs are included in retained transcripts (skips `hindsight_*` tools to avoid feedback loops)
 - **Compaction hook**: Retains + injects query-relevant memories during context compaction so they survive window trimming
 
 ## Quick Start
@@ -116,6 +118,7 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_RECALL_BUDGET`     | Recall budget: `low`, `mid`, `high`                      | `mid`                                 |
 | `HINDSIGHT_RECALL_MAX_TOKENS` | Max tokens for recall results                            | `1024`                                |
 | `HINDSIGHT_MIN_RECALL_PROMPT_CHARS` | Skip auto-recall when user prompt is shorter        | `5`                                   |
+| `HINDSIGHT_RETAIN_TOOL_CALLS` | Include tool call/result parts in retained transcripts | `true`                             |
 | `HINDSIGHT_RECALL_TAGS`       | Comma-separated, filter recalls                          | (none)                                |
 | `HINDSIGHT_RECALL_TAGS_MATCH` | Tag match mode: `any`, `all`, `any_strict`, `all_strict` | `any`                                 |
 | `HINDSIGHT_RETAIN_TAGS`       | Comma-separated, added to every retain                   | (none)                                |
