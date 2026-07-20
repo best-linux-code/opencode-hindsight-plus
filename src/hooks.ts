@@ -95,6 +95,20 @@ type OpencodeClient = {
       response?: unknown;
     }>;
   };
+  tui?: {
+    showToast?: (params: {
+      title?: string;
+      message?: string;
+      variant?: "info" | "success" | "warning" | "error";
+      duration?: number;
+    }) => unknown;
+  };
+};
+
+type TurnRecallResult = {
+  context: string | null;
+  /** True when a new Hindsight API recall ran (not turn-cache). */
+  fresh: boolean;
 };
 
 export interface HindsightHooks {
@@ -490,10 +504,29 @@ export function createHooks(
    * OpenCode synthetic-user path passes transform messages (already in hand).
    * System mode falls back to getSessionMessages (no transform payload).
    */
+  function showInjectToast(chars: number): void {
+    if (!config.injectToast) return;
+    const showToast = opencodeClient.tui?.showToast;
+    if (typeof showToast !== "function") return;
+    try {
+      const result = showToast({
+        title: "Hindsight",
+        message: `Memory injected · ${chars} chars`,
+        variant: "info",
+        duration: 2500,
+      });
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        (result as Promise<unknown>).then(undefined, () => {});
+      }
+    } catch {
+      /* toast is best-effort; headless / no TUI is fine */
+    }
+  }
+
   async function ensureTurnRecall(
     sessionId: string,
     providedMessages?: readonly Message[]
-  ): Promise<string | null> {
+  ): Promise<TurnRecallResult> {
     trackSession(sessionId);
 
     const messages = providedMessages
@@ -509,7 +542,7 @@ export function createHooks(
     const lastUser = lastUserMessage(messages);
     if (!lastUser) {
       logger.debug(`ensureTurnRecall: no user message yet for ${sessionId}`);
-      return null;
+      return { context: null, fresh: false };
     }
 
     const prompt = lastUser.content.trim();
@@ -517,7 +550,7 @@ export function createHooks(
       logger.debug(
         `ensureTurnRecall: prompt too short (${prompt.length} < ${config.minRecallPromptChars}), skip`
       );
-      return null;
+      return { context: null, fresh: false };
     }
 
     const userTurns = countUserTurns(messages);
@@ -525,7 +558,7 @@ export function createHooks(
 
     if (cached && cached.userTurnCount === userTurns) {
       logger.debug(`ensureTurnRecall: cache hit session ${sessionId} turn ${userTurns}`);
-      return cached.context;
+      return { context: cached.context, fresh: false };
     }
 
     await ensureBankMission(hindsightClient, bankId, config, state.missionsSet, logger);
@@ -540,7 +573,7 @@ export function createHooks(
       state.turnRecall.set(sessionId, { userTurnCount: userTurns, context });
       capMapSize(state.turnRecall, 1000);
     }
-    return context;
+    return { context, fresh: ok };
   }
 
   const systemTransform = async (
@@ -554,13 +587,16 @@ export function createHooks(
       if (!sessionId) return;
 
       // System mode has no transform messages — fetch text-only history (legacy path).
-      const context = await ensureTurnRecall(sessionId);
+      const { context, fresh } = await ensureTurnRecall(sessionId);
       if (context) {
         applyContextToSystem(output, context);
-        logger.info(`Injected per-turn recall into system`, {
-          session: sessionId,
-          chars: context.length,
-        });
+        if (fresh) {
+          logger.info(`Injected per-turn recall into system`, {
+            session: sessionId,
+            chars: context.length,
+          });
+          showInjectToast(context.length);
+        }
       }
     } catch (e) {
       logger.error("System transform hook error", e);
@@ -582,15 +618,21 @@ export function createHooks(
       }
 
       // Claude-like: use messages already in the prompt pipeline — no full session API.
-      const context = await ensureTurnRecall(sessionId, messagesFromTransformOutput(output));
+      const { context, fresh } = await ensureTurnRecall(
+        sessionId,
+        messagesFromTransformOutput(output)
+      );
       if (!context) return;
 
       const ok = applyContextToLatestUserMessage(output, context);
       if (ok) {
-        logger.info(`Injected per-turn recall as synthetic user part`, {
-          session: sessionId,
-          chars: context.length,
-        });
+        if (fresh) {
+          logger.info(`Injected per-turn recall as synthetic user part`, {
+            session: sessionId,
+            chars: context.length,
+          });
+          showInjectToast(context.length);
+        }
       } else {
         logger.debug(`messagesTransform: no user message to attach synthetic part`);
       }

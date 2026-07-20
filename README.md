@@ -7,7 +7,7 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 ## Features
 
 - **Custom tools**: `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` — the agent calls these explicitly
-- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default `recallContextTurns: 1` uses only the latest user text — no full-session re-fetch (Claude `recall.py` path). Multi-turn prior context (`recallContextTurns > 1`) is composed from the transform payload already in hand. Default inject mode is `synthetic-user` (a `synthetic: true` text part on the latest user message, closer to Claude `additionalContext`). Set `recallInjectMode: "system"` to fold into `system[0]` instead (that path still loads session messages). Tool-loop reuses the turn cache. Successful inject logs at **INFO** (chars).
+- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default `recallContextTurns: 1` uses only the latest user text — no full-session re-fetch (Claude `recall.py` path). Multi-turn prior context (`recallContextTurns > 1`) is composed from the transform payload already in hand. Default inject mode is `synthetic-user` (a `synthetic: true` text part on the latest user message, closer to Claude `additionalContext`). Set `recallInjectMode: "system"` to fold into `system[0]` instead (that path still loads session messages). Tool-loop reuses the turn cache. Successful inject logs at **INFO** (chars). Optional TUI toast via `"injectToast": true` (fresh inject only; tool-loop silent).
 - **Multi-bank recall**: `recallAdditionalBanks` merges results from extra banks (Claude `recallAdditionalBanks`).
 - **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment). Throttle is Claude-style **`userTurns % retainEveryNTurns === 0`**. Transcripts are sanitized (strip `U+0000` / C0 controls) before retain.
 - **SessionEnd flush**: Force-retains any pending turns on `session.deleted` and plugin `dispose` (Claude Code `SessionEnd` alignment), even when under `retainEveryNTurns`
@@ -128,6 +128,7 @@ Create `~/.hindsight/opencode.json` for persistent configuration:
 | `HINDSIGHT_USER_ID`           | Used by `{user_id}` template in retain tags/metadata   | (empty)                            |
 | `HINDSIGHT_ENABLE_KNOWLEDGE_PAGES` | Register `hindsight_page_*` tools                 | `true`                             |
 | `HINDSIGHT_RECALL_INJECT_MODE` | `synthetic-user` (default) or `system`               | `synthetic-user`                   |
+| `HINDSIGHT_INJECT_TOAST`      | Show TUI toast on fresh memory inject                | `false`                            |
 | `HINDSIGHT_RECALL_ADDITIONAL_BANKS` | Comma-separated extra banks to merge on recall | (none)                          |
 | `HINDSIGHT_RECALL_TAGS`       | Comma-separated, filter recalls                          | (none)                                |
 | `HINDSIGHT_RECALL_TAGS_MATCH` | Tag match mode: `any`, `all`, `any_strict`, `all_strict` | `any`                                 |

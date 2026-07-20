@@ -946,3 +946,75 @@ describe("recallAdditionalBanks", () => {
     expect(syn?.text).toContain("Shared profile");
   });
 });
+
+
+describe("injectToast", () => {
+  it("shows TUI toast only on fresh inject when injectToast is true", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "Toast fact", type: "observation" }],
+    });
+    const showToast = vi.fn();
+    const opencodeClient = {
+      ...makeOpencodeClient([]),
+      tui: { showToast },
+    };
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user", injectToast: true }),
+      makeState(),
+      opencodeClient as any
+    );
+    const output = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "Where do we deploy toast?" }],
+        },
+      ],
+    };
+    await hooks["experimental.chat.messages.transform"]({}, output);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast.mock.calls[0][0]).toMatchObject({
+      title: "Hindsight",
+      variant: "info",
+    });
+    expect(showToast.mock.calls[0][0].message).toContain("chars");
+
+    // Tool-loop cache re-apply: no second toast
+    await hooks["experimental.chat.messages.transform"]({}, output);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not toast when injectToast is false", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "Silent", type: "observation" }],
+    });
+    const showToast = vi.fn();
+    const opencodeClient = {
+      ...makeOpencodeClient([]),
+      tui: { showToast },
+    };
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user", injectToast: false }),
+      makeState(),
+      opencodeClient as any
+    );
+    await hooks["experimental.chat.messages.transform"](
+      {},
+      {
+        messages: [
+          {
+            info: { role: "user" as const, sessionID: "sess-1" },
+            parts: [{ type: "text", text: "No toast please here" }],
+          },
+        ],
+      }
+    );
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});

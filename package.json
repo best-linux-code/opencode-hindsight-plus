@@ -1,6 +1,6 @@
 {
   "name": "opencode-hindsight-plus",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Claude-aligned Hindsight for OpenCode: transform-local recall, multi-bank, ingest tools, synthetic-user inject, knowledge pages",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

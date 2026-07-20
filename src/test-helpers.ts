@@ -34,6 +34,7 @@ export function makeConfig(overrides: Partial<HindsightConfig> = {}): HindsightC
     retainMission: null,
     agentName: "opencode",
     enableKnowledgePages: true,
+    injectToast: false,
     debug: false,
     ...overrides,
   };

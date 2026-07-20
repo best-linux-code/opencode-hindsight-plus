@@ -74,6 +74,12 @@ export interface HindsightConfig {
   // Misc
   /** Register knowledge page tools (Hindsight mental-models / Claude agent_knowledge pages). */
   enableKnowledgePages: boolean;
+  /**
+   * When true, show an OpenCode TUI toast on a *fresh* successful inject
+   * (new user turn with memories). Cache re-applies during tool loops stay silent.
+   * Headless `opencode run` has no TUI — toast is a no-op there.
+   */
+  injectToast: boolean;
   debug: boolean;
 }
 
@@ -129,6 +135,7 @@ const DEFAULTS: HindsightConfig = {
 
   // Misc
   enableKnowledgePages: true,
+  injectToast: false,
   debug: false,
 };
 
@@ -160,6 +167,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_RECALL_PROMPT_PREAMBLE: ["recallPromptPreamble", "string"],
   HINDSIGHT_RETAIN_CONTEXT: ["retainContext", "string"],
   HINDSIGHT_RESOLVE_WORKTREES: ["resolveWorktrees", "bool"],
+  HINDSIGHT_INJECT_TOAST: ["injectToast", "bool"],
   // NOTE: `debug` is intentionally NOT an env override. It is a proper config
   // option set via opencode.json plugin options or ~/.hindsight/opencode.json,
   // because env vars are unreliable to set for OpenCode's plugin runtime
