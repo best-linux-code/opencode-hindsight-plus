@@ -976,11 +976,14 @@ describe("injectToast", () => {
     };
     await hooks["experimental.chat.messages.transform"]({}, output);
     expect(showToast).toHaveBeenCalledTimes(1);
+    // OpenCode/OMO style: body-wrapped toast payload
     expect(showToast.mock.calls[0][0]).toMatchObject({
-      title: "Hindsight",
-      variant: "info",
+      body: {
+        title: "Hindsight",
+        variant: "info",
+      },
     });
-    expect(showToast.mock.calls[0][0].message).toContain("chars");
+    expect(showToast.mock.calls[0][0].body.message).toContain("chars");
 
     // Tool-loop cache re-apply: no second toast
     await hooks["experimental.chat.messages.transform"]({}, output);

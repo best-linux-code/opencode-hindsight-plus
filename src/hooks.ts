@@ -96,12 +96,12 @@ type OpencodeClient = {
     }>;
   };
   tui?: {
-    showToast?: (params: {
-      title?: string;
-      message?: string;
-      variant?: "info" | "success" | "warning" | "error";
-      duration?: number;
-    }) => unknown;
+    /**
+     * OpenCode SDK shapes differ by version:
+     * - common (OMO / v1-style): showToast({ body: { title, message, variant, duration } })
+     * - v2 flat: showToast({ title, message, variant, duration })
+     */
+    showToast?: (params: Record<string, unknown>) => unknown;
   };
 };
 
@@ -507,19 +507,45 @@ export function createHooks(
   function showInjectToast(chars: number): void {
     if (!config.injectToast) return;
     const showToast = opencodeClient.tui?.showToast;
-    if (typeof showToast !== "function") return;
+    if (typeof showToast !== "function") {
+      logger.debug("injectToast: client.tui.showToast unavailable");
+      return;
+    }
+    const payload = {
+      title: "Hindsight",
+      message: `Memory injected · ${chars} chars`,
+      variant: "info" as const,
+      duration: 2500,
+    };
+    // Prefer body-wrapped call (OpenCode v1 / OhMyOpenCode); fall back to flat v2.
     try {
-      const result = showToast({
-        title: "Hindsight",
-        message: `Memory injected · ${chars} chars`,
-        variant: "info",
-        duration: 2500,
-      });
+      const result = showToast({ body: payload });
       if (result && typeof (result as Promise<unknown>).then === "function") {
-        (result as Promise<unknown>).then(undefined, () => {});
+        (result as Promise<unknown>).then(
+          () => {
+            logger.debug("injectToast: toast shown", { chars });
+          },
+          (err: unknown) => {
+            try {
+              const flat = showToast(payload);
+              if (flat && typeof (flat as Promise<unknown>).then === "function") {
+                (flat as Promise<unknown>).then(undefined, () => {});
+              }
+            } catch {
+              logger.debug("injectToast: showToast failed", { error: String(err) });
+            }
+          }
+        );
       }
-    } catch {
-      /* toast is best-effort; headless / no TUI is fine */
+    } catch (err) {
+      try {
+        const flat = showToast(payload);
+        if (flat && typeof (flat as Promise<unknown>).then === "function") {
+          (flat as Promise<unknown>).then(undefined, () => {});
+        }
+      } catch (err2) {
+        logger.debug("injectToast: showToast failed", { error: String(err2) });
+      }
     }
   }
 
