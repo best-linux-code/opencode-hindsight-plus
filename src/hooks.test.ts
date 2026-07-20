@@ -728,12 +728,13 @@ describe("messages transform — synthetic-user inject", () => {
     client.recall.mockResolvedValue({
       results: [{ text: "Deploy on Fly.io", type: "observation" }],
     });
+    const opencodeClient = makeOpencodeClient([]);
     const hooks = createHooks(
       client,
       "bank",
       makeConfig({ recallInjectMode: "synthetic-user" }),
       makeState(),
-      makeOpencodeClient([userMsg("Where do we deploy?")])
+      opencodeClient
     );
 
     const output = {
@@ -748,6 +749,8 @@ describe("messages transform — synthetic-user inject", () => {
     await hooks["experimental.chat.messages.transform"]({}, output);
 
     expect(client.recall).toHaveBeenCalledTimes(1);
+    expect(client.recall.mock.calls[0][1]).toContain("Where do we deploy?");
+    expect(opencodeClient.session.messages).not.toHaveBeenCalled();
     expect(output.messages[0].parts.length).toBe(2);
     const syn = output.messages[0].parts[1];
     expect(syn.synthetic).toBe(true);
@@ -760,7 +763,7 @@ describe("messages transform — synthetic-user inject", () => {
     client.recall
       .mockResolvedValueOnce({ results: [{ text: "Old", type: "observation" }] })
       .mockResolvedValueOnce({ results: [{ text: "New", type: "observation" }] });
-    const opencodeClient = makeOpencodeClient([userMsg("Topic one about alpha")]);
+    const opencodeClient = makeOpencodeClient([]);
     const hooks = createHooks(
       client,
       "bank",
@@ -779,16 +782,16 @@ describe("messages transform — synthetic-user inject", () => {
     };
     await hooks["experimental.chat.messages.transform"]({}, output1);
 
-    opencodeClient.session.messages.mockResolvedValue({
-      data: [
-        userMsg("Topic one about alpha"),
-        assistantMsg("ok"),
-        userMsg("Topic two about beta"),
-      ],
-    });
-
     const output2 = {
       messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "Topic one about alpha" }],
+        },
+        {
+          info: { role: "assistant" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "ok" }],
+        },
         {
           info: { role: "user" as const, sessionID: "sess-1" },
           parts: [
@@ -804,13 +807,56 @@ describe("messages transform — synthetic-user inject", () => {
     };
     await hooks["experimental.chat.messages.transform"]({}, output2);
 
-    const memParts = output2.messages[0].parts.filter(
+    expect(opencodeClient.session.messages).not.toHaveBeenCalled();
+    const lastUser = output2.messages[2];
+    const memParts = lastUser.parts.filter(
       (p) => typeof p.text === "string" && p.text.includes("<hindsight_memories>")
     );
     expect(memParts.length).toBe(1);
     expect(memParts[0].text).toContain("New");
     expect(memParts[0].text).not.toContain("Old");
     expect(memParts[0].synthetic).toBe(true);
+  });
+
+  it("composes multi-turn query from transform messages without session fetch", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "mem", type: "observation" }],
+    });
+    const opencodeClient = makeOpencodeClient([]);
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user", recallContextTurns: 2 }),
+      makeState(),
+      opencodeClient
+    );
+
+    await hooks["experimental.chat.messages.transform"](
+      {},
+      {
+        messages: [
+          {
+            info: { role: "user", sessionID: "sess-1" },
+            parts: [{ type: "text", text: "First question about alpha" }],
+          },
+          {
+            info: { role: "assistant", sessionID: "sess-1" },
+            parts: [{ type: "text", text: "alpha answer" }],
+          },
+          {
+            info: { role: "user", sessionID: "sess-1" },
+            parts: [{ type: "text", text: "Second question about beta" }],
+          },
+        ],
+      }
+    );
+
+    expect(opencodeClient.session.messages).not.toHaveBeenCalled();
+    const query = client.recall.mock.calls[0][1] as string;
+    expect(query).toContain("Prior context:");
+    expect(query).toContain("Second question about beta");
+    expect(query).toContain("First question about alpha");
   });
 
   it("does nothing in system inject mode", async () => {

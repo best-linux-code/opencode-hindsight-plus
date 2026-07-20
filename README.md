@@ -7,7 +7,7 @@ Fork of [`@vectorize-io/opencode-hindsight`](https://github.com/vectorize-io/hin
 ## Features
 
 - **Custom tools**: `hindsight_retain`, `hindsight_recall`, `hindsight_reflect` — the agent calls these explicitly
-- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default inject mode is `synthetic-user` (a `synthetic: true` text part on the latest user message, closer to Claude `additionalContext`). Set `recallInjectMode: "system"` to fold into `system[0]` instead. Tool-loop reuses the turn cache.
+- **Per-turn auto-recall**: On every user message, queries Hindsight with the current prompt (Claude Code `UserPromptSubmit` alignment). Default `recallContextTurns: 1` uses only the latest user text — no full-session re-fetch (Claude `recall.py` path). Multi-turn prior context (`recallContextTurns > 1`) is composed from the transform payload already in hand. Default inject mode is `synthetic-user` (a `synthetic: true` text part on the latest user message, closer to Claude `additionalContext`). Set `recallInjectMode: "system"` to fold into `system[0]` instead (that path still loads session messages). Tool-loop reuses the turn cache.
 - **Auto-retain**: Captures conversation on `session.idle` (Claude Code `Stop` alignment) and stores to Hindsight
 - **SessionEnd flush**: Force-retains any pending turns on `session.deleted` and plugin `dispose` (Claude Code `SessionEnd` alignment), even when under `retainEveryNTurns`
 - **Tool trajectory retain** (opt-in): Set `retainToolCalls: true` to include tool call inputs/outputs in retained transcripts (skips `hindsight_*` tools). Default is `false` (Claude Code-aligned) to avoid fact/consolidation blowups from agent tool noise

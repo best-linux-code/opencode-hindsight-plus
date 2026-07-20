@@ -163,6 +163,43 @@ function sessionIdFromMessages(output: MessagesTransformOutput): string | undefi
   return undefined;
 }
 
+/**
+ * Text content from transform parts for recall query composition.
+ * Skips prior hindsight injects. Prefer non-synthetic text (Claude: user prompt only).
+ */
+function textFromParts(
+  parts: readonly SessionPart[],
+  includeSynthetic: boolean
+): string {
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (part.type !== "text" || typeof part.text !== "string" || !part.text) continue;
+    if (isHindsightMemoryPart(part)) continue;
+    if (!includeSynthetic && part.synthetic) continue;
+    chunks.push(part.text);
+  }
+  return chunks.join("\n").trim();
+}
+
+/**
+ * Convert OpenCode transform messages → text-only Message[] for recall.
+ * Claude Code uses hook `prompt` (+ optional transcript); we use the transform
+ * payload already in hand so we never re-fetch the full session for recall.
+ */
+function messagesFromTransformOutput(output: MessagesTransformOutput): Message[] {
+  const messages: Message[] = [];
+  for (const msg of output.messages) {
+    const role = msg.info.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const content =
+      role === "user"
+        ? textFromParts(msg.parts, false) || textFromParts(msg.parts, true)
+        : textFromParts(msg.parts, true);
+    if (content) messages.push({ role, content });
+  }
+  return messages;
+}
+
 function capMapSize<K, V>(map: Map<K, V>, max: number): void {
   if (map.size <= max) return;
   const first = map.keys().next().value;
@@ -418,12 +455,32 @@ export function createHooks(
 
   /**
    * Shared per-turn recall: returns context string (or null) and updates turn cache.
-   * Text-only messages for query composition (no tool dumps).
+   *
+   * Claude Code alignment (recall.py):
+   *   - Default recallContextTurns=1 → query is latest user prompt only
+   *   - Does NOT re-fetch full session for every recall
+   *   - Multi-turn prior context only when turns > 1 (from provided messages /
+   *     transcript), not a full session.messages dump
+   *
+   * OpenCode synthetic-user path passes transform messages (already in hand).
+   * System mode falls back to getSessionMessages (no transform payload).
    */
-  async function ensureTurnRecall(sessionId: string): Promise<string | null> {
+  async function ensureTurnRecall(
+    sessionId: string,
+    providedMessages?: readonly Message[]
+  ): Promise<string | null> {
     trackSession(sessionId);
 
-    const messages = await getSessionMessages(sessionId, false);
+    const messages = providedMessages
+      ? [...providedMessages]
+      : await getSessionMessages(sessionId, false);
+
+    if (providedMessages) {
+      logger.debug(
+        `ensureTurnRecall: using ${messages.length} transform message(s), no session fetch`
+      );
+    }
+
     const lastUser = lastUserMessage(messages);
     if (!lastUser) {
       logger.debug(`ensureTurnRecall: no user message yet for ${sessionId}`);
@@ -448,6 +505,7 @@ export function createHooks(
 
     await ensureBankMission(hindsightClient, bankId, config, state.missionsSet, logger);
 
+    // Claude: turns<=1 → query = prompt; turns>1 → compose from recent history.
     const query = composeRecallQuery(prompt, messages, config.recallContextTurns);
     const truncated = truncateRecallQuery(query, prompt, config.recallMaxQueryChars);
     logger.debug(`ensureTurnRecall: recalling turn ${userTurns}, queryLen=${truncated.length}`);
@@ -470,6 +528,7 @@ export function createHooks(
       const sessionId = input.sessionID;
       if (!sessionId) return;
 
+      // System mode has no transform messages — fetch text-only history (legacy path).
       const context = await ensureTurnRecall(sessionId);
       if (context) {
         applyContextToSystem(output, context);
@@ -494,7 +553,8 @@ export function createHooks(
         return;
       }
 
-      const context = await ensureTurnRecall(sessionId);
+      // Claude-like: use messages already in the prompt pipeline — no full session API.
+      const context = await ensureTurnRecall(sessionId, messagesFromTransformOutput(output));
       if (!context) return;
 
       const ok = applyContextToLatestUserMessage(output, context);
