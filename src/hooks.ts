@@ -227,6 +227,7 @@ export function createHooks(
   interface RecallOutcome {
     context: string | null;
     ok: boolean;
+    resultCount?: number;
   }
 
   function trackSession(sessionId: string): void {
@@ -239,15 +240,33 @@ export function createHooks(
 
   async function recallForContext(query: string): Promise<RecallOutcome> {
     try {
-      const response = await hindsightClient.recall(bankId, query, {
+      const recallOpts = {
         budget: config.recallBudget as "low" | "mid" | "high",
         maxTokens: config.recallMaxTokens,
         types: config.recallTypes,
         tags: config.recallTags.length ? config.recallTags : undefined,
         tagsMatch: config.recallTags.length ? config.recallTagsMatch : undefined,
-      });
+      };
 
-      const results = response.results || [];
+      const response = await hindsightClient.recall(bankId, query, recallOpts);
+      let results = response.results || [];
+
+      // Claude recallAdditionalBanks: merge extra bank hits into one inject block
+      for (const extraBank of config.recallAdditionalBanks) {
+        if (!extraBank || extraBank === bankId) continue;
+        try {
+          const extra = await hindsightClient.recall(extraBank, query, recallOpts);
+          const extraResults = extra.results || [];
+          if (extraResults.length) {
+            results = results.concat(extraResults);
+          }
+        } catch (e) {
+          logger.debug(`Recall from additional bank '${extraBank}' failed`, {
+            error: String(e),
+          });
+        }
+      }
+
       if (!results.length) return { context: null, ok: true };
 
       const formatted = formatMemories(results);
@@ -257,10 +276,10 @@ export function createHooks(
         `Current time: ${formatCurrentTime()} UTC\n\n` +
         `${formatted}\n` +
         `</hindsight_memories>`;
-      return { context, ok: true };
+      return { context, ok: true, resultCount: results.length };
     } catch (e) {
       logger.error("Recall failed", e);
-      return { context: null, ok: false };
+      return { context: null, ok: false, resultCount: 0 };
     }
   }
 
@@ -332,8 +351,10 @@ export function createHooks(
   }
 
   /**
-   * Retain when there are user turns not yet covered by lastRetainedTurn.
-   * force=true ignores retainEveryNTurns (SessionEnd / dispose / deleted).
+   * Claude Stop-style retain gate:
+   * - force (SessionEnd/dispose): any pending turns
+   * - else: fire when userTurns % retainEveryNTurns === 0 (and not already retained)
+   * OpenCode fires this on session.idle (closest equivalent to Claude Stop).
    */
   async function maybeRetainSession(
     sessionId: string,
@@ -347,16 +368,20 @@ export function createHooks(
     const userTurns = countUserTurns(messages);
     const lastRetained = state.lastRetainedTurn.get(sessionId) || 0;
     const pending = userTurns - lastRetained;
+    const everyN = Math.max(1, config.retainEveryNTurns);
 
     if (pending <= 0) {
       logger.debug(`${opts.reason}: nothing pending for ${sessionId}`);
       return;
     }
-    if (!opts.force && pending < config.retainEveryNTurns) {
-      logger.debug(
-        `${opts.reason}: waiting for more turns (${pending}/${config.retainEveryNTurns})`
-      );
-      return;
+    if (!opts.force) {
+      // Claude: if every_n > 1 and turn_count % every_n != 0 → skip
+      if (everyN > 1 && userTurns % everyN !== 0) {
+        logger.debug(
+          `${opts.reason}: turn ${userTurns} not multiple of ${everyN}, skip retain`
+        );
+        return;
+      }
     }
 
     try {
@@ -532,7 +557,10 @@ export function createHooks(
       const context = await ensureTurnRecall(sessionId);
       if (context) {
         applyContextToSystem(output, context);
-        logger.debug(`Injected per-turn recall into system for session ${sessionId}`);
+        logger.info(`Injected per-turn recall into system`, {
+          session: sessionId,
+          chars: context.length,
+        });
       }
     } catch (e) {
       logger.error("System transform hook error", e);
@@ -559,9 +587,10 @@ export function createHooks(
 
       const ok = applyContextToLatestUserMessage(output, context);
       if (ok) {
-        logger.debug(
-          `Injected per-turn recall as synthetic user part for session ${sessionId}`
-        );
+        logger.info(`Injected per-turn recall as synthetic user part`, {
+          session: sessionId,
+          chars: context.length,
+        });
       } else {
         logger.debug(`messagesTransform: no user message to attach synthetic part`);
       }

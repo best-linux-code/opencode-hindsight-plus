@@ -174,7 +174,7 @@ describe("event hook — session.idle", () => {
     expect(opts.documentId).toMatch(/^sess-1-\d+$/);
   });
 
-  it("respects retainEveryNTurns", async () => {
+  it("respects retainEveryNTurns (Claude turn % N gate)", async () => {
     const client = makeClient();
     const messages = [userMsg("Only one turn"), assistantMsg("ok")];
     const state = makeState();
@@ -191,6 +191,31 @@ describe("event hook — session.idle", () => {
     });
 
     expect(client.retain).not.toHaveBeenCalled();
+  });
+
+  it("retains when userTurns is a multiple of retainEveryNTurns", async () => {
+    const client = makeClient();
+    const messages = [
+      userMsg("turn one hello"),
+      assistantMsg("ok1"),
+      userMsg("turn two hello"),
+      assistantMsg("ok2"),
+      userMsg("turn three hello"),
+      assistantMsg("ok3"),
+    ];
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ retainEveryNTurns: 3 }),
+      makeState(),
+      makeOpencodeClient(messages)
+    );
+
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "sess-1" } },
+    });
+
+    expect(client.retain).toHaveBeenCalledTimes(1);
   });
 
   it("includes tool parts in retain transcript when retainToolCalls is true", async () => {
@@ -882,5 +907,42 @@ describe("messages transform — synthetic-user inject", () => {
     await hooks["experimental.chat.messages.transform"]({}, output);
     expect(client.recall).not.toHaveBeenCalled();
     expect(output.messages[0].parts.length).toBe(1);
+  });
+});
+
+
+describe("recallAdditionalBanks", () => {
+  it("merges memories from additional banks on synthetic-user inject", async () => {
+    const client = makeClient();
+    client.recall
+      .mockResolvedValueOnce({ results: [{ text: "Primary fact", type: "observation" }] })
+      .mockResolvedValueOnce({ results: [{ text: "Shared profile", type: "observation" }] });
+    const hooks = createHooks(
+      client,
+      "primary-bank",
+      makeConfig({
+        recallInjectMode: "synthetic-user",
+        recallAdditionalBanks: ["profile-bank"],
+      }),
+      makeState(),
+      makeOpencodeClient([])
+    );
+    const output = {
+      messages: [
+        {
+          info: { role: "user" as const, sessionID: "sess-1" },
+          parts: [{ type: "text", text: "What do we know about deploy?" }],
+        },
+      ],
+    };
+    await hooks["experimental.chat.messages.transform"]({}, output);
+    expect(client.recall).toHaveBeenCalledTimes(2);
+    expect(client.recall.mock.calls[0][0]).toBe("primary-bank");
+    expect(client.recall.mock.calls[1][0]).toBe("profile-bank");
+    const syn = output.messages[0].parts.find(
+      (p) => typeof p.text === "string" && p.text.includes("hindsight_memories")
+    );
+    expect(syn?.text).toContain("Primary fact");
+    expect(syn?.text).toContain("Shared profile");
   });
 });

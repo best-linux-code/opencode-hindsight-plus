@@ -311,6 +311,15 @@ export function resolveRetainMetadata(
  *
  * Uses [role: ...]...[role:end] markers for structured retention.
  */
+/**
+ * Strip characters that break Hindsight/Postgres text storage (e.g. U+0000).
+ * Keeps tab/newline/carriage-return; drops other C0 controls.
+ */
+export function sanitizeForRetain(text: string): string {
+  // eslint-disable-next-line no-control-regex -- intentional C0 strip for DB safety
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+}
+
 export function prepareRetentionTranscript(
   messages: Message[],
   retainFullWindow: boolean = false
@@ -335,7 +344,7 @@ export function prepareRetentionTranscript(
 
   const parts: string[] = [];
   for (const msg of targetMessages) {
-    const content = stripMemoryTags(msg.content).trim();
+    const content = sanitizeForRetain(stripMemoryTags(msg.content)).trim();
     if (!content) continue;
     parts.push(`[role: ${msg.role}]\n${content}\n[${msg.role}:end]`);
   }

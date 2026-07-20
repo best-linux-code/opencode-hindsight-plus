@@ -15,7 +15,24 @@ import {
   resolveRetainTags,
   resolveRetainMetadata,
   applyTemplateString,
+  sanitizeForRetain,
 } from "./content.js";
+
+describe("sanitizeForRetain", () => {
+  it("strips NUL and other C0 controls but keeps newlines", () => {
+    expect(sanitizeForRetain("a\u0000b\nc\td")).toBe("ab\nc\td");
+  });
+
+  it("strips NUL from retention transcript", () => {
+    const { transcript } = prepareRetentionTranscript(
+      [{ role: "user", content: "hello\u0000 world enough" }],
+      true
+    );
+    expect(transcript).toBeTruthy();
+    expect(transcript).not.toContain("\u0000");
+    expect(transcript).toContain("hello world enough");
+  });
+});
 
 describe("stripMemoryTags", () => {
   it("removes <hindsight_memories> blocks", () => {

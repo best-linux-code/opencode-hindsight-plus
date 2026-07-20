@@ -269,3 +269,28 @@ describe("ensureBankMission", () => {
     });
   });
 });
+
+
+describe("directoryBankMap + resolveWorktrees", () => {
+  it("prefers directoryBankMap over dynamic bank id", () => {
+    const config = makeConfig({
+      dynamicBankId: true,
+      dynamicBankGranularity: ["gitProject"],
+      directoryBankMap: { "/data/sim-mgmt": "mapped-sim" },
+    });
+    expect(deriveBankId(config, "/data/sim-mgmt")).toBe("mapped-sim");
+  });
+
+  it("uses basename only when resolveWorktrees is false for gitProject", () => {
+    mockExec.mockClear();
+    mockExec.mockReturnValue("/home/user/main-repo/.git\n");
+    const config = makeConfig({
+      dynamicBankId: true,
+      dynamicBankGranularity: ["gitProject"],
+      resolveWorktrees: false,
+      directoryBankMap: {},
+    });
+    expect(deriveBankId(config, "/home/user/linked-wt")).toBe("linked-wt");
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+});

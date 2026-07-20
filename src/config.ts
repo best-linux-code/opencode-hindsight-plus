@@ -34,6 +34,8 @@ export interface HindsightConfig {
   recallPromptPreamble: string;
   recallTags: string[];
   recallTagsMatch: "any" | "all" | "any_strict" | "all_strict";
+  /** Extra bank IDs to query on every auto-recall (Claude recallAdditionalBanks). */
+  recallAdditionalBanks: string[];
 
   // Retain
   autoRetain: boolean;
@@ -55,6 +57,16 @@ export interface HindsightConfig {
   bankIdPrefix: string;
   dynamicBankId: boolean;
   dynamicBankGranularity: string[];
+  /**
+   * Explicit cwd/path → bank_id map (Claude directoryBankMap).
+   * Highest priority when a realpath match is found.
+   */
+  directoryBankMap: Record<string, string>;
+  /**
+   * When true (default), gitProject / directory map resolution uses the main
+   * worktree root so linked worktrees share one bank (Claude resolveWorktrees).
+   */
+  resolveWorktrees: boolean;
   bankMission: string;
   retainMission: string | null;
   agentName: string;
@@ -78,6 +90,7 @@ const DEFAULTS: HindsightConfig = {
   recallInjectMode: "synthetic-user",
   recallTags: [],
   recallTagsMatch: "any",
+  recallAdditionalBanks: [],
   recallPromptPreamble:
     "Relevant memories from past conversations (prioritize recent when " +
     "conflicting). Only use memories that are directly useful to continue " +
@@ -104,6 +117,8 @@ const DEFAULTS: HindsightConfig = {
   bankIdPrefix: "",
   dynamicBankId: true,
   dynamicBankGranularity: ["gitProject"],
+  directoryBankMap: {},
+  resolveWorktrees: true,
   bankMission:
     "You are an OpenCode AI coding agent. Focus on technical discussions, decisions, " +
     "and context relevant to the user's projects.",
@@ -144,6 +159,7 @@ const ENV_OVERRIDES: Record<string, [keyof HindsightConfig, "string" | "bool" | 
   HINDSIGHT_RECALL_TAGS_MATCH: ["recallTagsMatch", "string"],
   HINDSIGHT_RECALL_PROMPT_PREAMBLE: ["recallPromptPreamble", "string"],
   HINDSIGHT_RETAIN_CONTEXT: ["retainContext", "string"],
+  HINDSIGHT_RESOLVE_WORKTREES: ["resolveWorktrees", "bool"],
   // NOTE: `debug` is intentionally NOT an env override. It is a proper config
   // option set via opencode.json plugin options or ~/.hindsight/opencode.json,
   // because env vars are unreliable to set for OpenCode's plugin runtime
@@ -222,14 +238,33 @@ export function loadConfig(pluginOptions?: Record<string, unknown>): HindsightCo
       .filter(Boolean);
   }
 
+  const additionalBanksEnv = process.env["HINDSIGHT_RECALL_ADDITIONAL_BANKS"];
+  if (additionalBanksEnv !== undefined) {
+    config["recallAdditionalBanks"] = additionalBanksEnv
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+
   const result = config as unknown as HindsightConfig;
 
+  if (!Array.isArray(result.recallAdditionalBanks)) {
+    result.recallAdditionalBanks = [];
+  }
+  if (!result.directoryBankMap || typeof result.directoryBankMap !== "object") {
+    result.directoryBankMap = {};
+  }
+
   // Validate enum-like fields to catch typos early
+  // "chunked" is Claude Code's name for last-turn sliding-window retain
+  if (result.retainMode === "chunked") {
+    result.retainMode = "last-turn";
+  }
   const VALID_RETAIN_MODES = ["full-session", "last-turn"];
   if (!VALID_RETAIN_MODES.includes(result.retainMode)) {
     console.error(
       `[Hindsight] Unknown retainMode "${result.retainMode}" — ` +
-        `valid: ${VALID_RETAIN_MODES.join(", ")}. Falling back to "full-session".`
+        `valid: ${VALID_RETAIN_MODES.join(", ")}, chunked. Falling back to "full-session".`
     );
     result.retainMode = "full-session";
   }

@@ -1,7 +1,7 @@
 {
   "name": "opencode-hindsight-plus",
-  "version": "0.3.8",
-  "description": "Hindsight memory plugin for OpenCode with Claude-aligned Hindsight for OpenCode: per-project banks, transform-local recall, synthetic-user inject, knowledge pages",
+  "version": "0.3.9",
+  "description": "Claude-aligned Hindsight for OpenCode: transform-local recall, multi-bank, ingest tools, synthetic-user inject, knowledge pages",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",

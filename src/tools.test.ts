@@ -332,3 +332,28 @@ describe("createTools", () => {
     expect(client.reflect.mock.calls[0][0]).toBe("fixed-bank");
   });
 });
+
+
+describe("hindsight_bank_current / ingest", () => {
+  it("returns the bound bank id", async () => {
+    const client = { retain: vi.fn(), recall: vi.fn(), reflect: vi.fn() } as any;
+    const tools = createTools(client, "my-bank", makeConfig({ enableKnowledgePages: false }));
+    const out = await tools.hindsight_bank_current.execute({}, mockContext as any);
+    expect(out).toContain("my-bank");
+  });
+
+  it("ingests title+content as a document", async () => {
+    const client = { retain: vi.fn().mockResolvedValue({}), recall: vi.fn(), reflect: vi.fn() } as any;
+    const tools = createTools(client, "my-bank", makeConfig({ enableKnowledgePages: false }));
+    const out = await tools.hindsight_ingest.execute(
+      { title: "API Notes", content: "Use the v2 endpoint for auth." },
+      mockContext as any
+    );
+    expect(out).toContain("api-notes");
+    expect(client.retain).toHaveBeenCalledWith(
+      "my-bank",
+      "Use the v2 endpoint for auth.",
+      expect.objectContaining({ documentId: "api-notes" })
+    );
+  });
+});
