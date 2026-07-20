@@ -508,9 +508,7 @@ export function createHooks(
     if (!config.injectToast) return;
 
     const tui = opencodeClient.tui;
-    const showToast = tui?.showToast;
-    if (typeof showToast !== "function") {
-      // Surface once per inject so TUI toast wiring is diagnosable without debug.
+    if (!tui || typeof tui.showToast !== "function") {
       logger.info("injectToast: client.tui.showToast unavailable", {
         hasTui: Boolean(tui),
         clientKeys: Object.keys(opencodeClient as object).slice(0, 20),
@@ -543,13 +541,14 @@ export function createHooks(
       logger.info("injectToast: toast shown", { chars, via: label, sync: true });
     };
 
-    // OhMyOpenCode / v1 SDK: { body: { title, message, variant, duration } }
-    // v2 SDK: flat { title, message, variant, duration }
+    // MUST call as method on tui so `this` stays bound (SDK uses this._client).
+    // Detached `const fn = tui.showToast; fn(...)` throws: this._client undefined.
+    // OhMyOpenCode / v1: { body: {...} }; v2 flat: { title, message, ... }
     try {
-      settle(showToast({ body: payload }), "body");
+      settle(tui.showToast({ body: payload }), "body");
     } catch (err) {
       try {
-        settle(showToast(payload), "flat");
+        settle(tui.showToast(payload), "flat");
       } catch (err2) {
         logger.info("injectToast: showToast threw", {
           error: err2 instanceof Error ? err2.message : String(err2),
