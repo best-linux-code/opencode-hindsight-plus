@@ -990,6 +990,41 @@ describe("injectToast", () => {
     expect(showToast).toHaveBeenCalledTimes(1);
   });
 
+  it("logs when tui.showToast is missing", async () => {
+    const client = makeClient();
+    client.recall.mockResolvedValue({
+      results: [{ text: "x", type: "observation" }],
+    });
+    const logs: string[] = [];
+    const { Logger } = await import("./logger.js");
+    const logger = new Logger({ silent: false, debug: false });
+    const orig = logger.info.bind(logger);
+    logger.info = (msg: string, extra?: Record<string, unknown>) => {
+      logs.push(msg);
+      orig(msg, extra);
+    };
+    const hooks = createHooks(
+      client,
+      "bank",
+      makeConfig({ recallInjectMode: "synthetic-user", injectToast: true }),
+      makeState(),
+      makeOpencodeClient([]) as any,
+      logger
+    );
+    await hooks["experimental.chat.messages.transform"](
+      {},
+      {
+        messages: [
+          {
+            info: { role: "user" as const, sessionID: "sess-1" },
+            parts: [{ type: "text", text: "Missing toast client path check" }],
+          },
+        ],
+      }
+    );
+    expect(logs.some((m) => m.includes("showToast unavailable"))).toBe(true);
+  });
+
   it("does not toast when injectToast is false", async () => {
     const client = makeClient();
     client.recall.mockResolvedValue({

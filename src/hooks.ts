@@ -506,45 +506,55 @@ export function createHooks(
    */
   function showInjectToast(chars: number): void {
     if (!config.injectToast) return;
-    const showToast = opencodeClient.tui?.showToast;
+
+    const tui = opencodeClient.tui;
+    const showToast = tui?.showToast;
     if (typeof showToast !== "function") {
-      logger.debug("injectToast: client.tui.showToast unavailable");
+      // Surface once per inject so TUI toast wiring is diagnosable without debug.
+      logger.info("injectToast: client.tui.showToast unavailable", {
+        hasTui: Boolean(tui),
+        clientKeys: Object.keys(opencodeClient as object).slice(0, 20),
+      });
       return;
     }
+
     const payload = {
       title: "Hindsight",
       message: `Memory injected · ${chars} chars`,
       variant: "info" as const,
-      duration: 2500,
+      duration: 4000,
     };
-    // Prefer body-wrapped call (OpenCode v1 / OhMyOpenCode); fall back to flat v2.
-    try {
-      const result = showToast({ body: payload });
+
+    const settle = (result: unknown, label: string): void => {
       if (result && typeof (result as Promise<unknown>).then === "function") {
         (result as Promise<unknown>).then(
           () => {
-            logger.debug("injectToast: toast shown", { chars });
+            logger.info("injectToast: toast shown", { chars, via: label });
           },
           (err: unknown) => {
-            try {
-              const flat = showToast(payload);
-              if (flat && typeof (flat as Promise<unknown>).then === "function") {
-                (flat as Promise<unknown>).then(undefined, () => {});
-              }
-            } catch {
-              logger.debug("injectToast: showToast failed", { error: String(err) });
-            }
+            logger.info("injectToast: showToast rejected", {
+              via: label,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         );
+        return;
       }
+      logger.info("injectToast: toast shown", { chars, via: label, sync: true });
+    };
+
+    // OhMyOpenCode / v1 SDK: { body: { title, message, variant, duration } }
+    // v2 SDK: flat { title, message, variant, duration }
+    try {
+      settle(showToast({ body: payload }), "body");
     } catch (err) {
       try {
-        const flat = showToast(payload);
-        if (flat && typeof (flat as Promise<unknown>).then === "function") {
-          (flat as Promise<unknown>).then(undefined, () => {});
-        }
+        settle(showToast(payload), "flat");
       } catch (err2) {
-        logger.debug("injectToast: showToast failed", { error: String(err2) });
+        logger.info("injectToast: showToast threw", {
+          error: err2 instanceof Error ? err2.message : String(err2),
+          bodyError: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }

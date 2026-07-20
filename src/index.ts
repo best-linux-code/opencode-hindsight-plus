@@ -67,6 +67,8 @@ const HindsightPlugin: Plugin = async (input, options) => {
     autoRecall: config.autoRecall,
     autoRetain: config.autoRetain,
     knowledgePages: config.enableKnowledgePages,
+    injectToast: config.injectToast,
+    recallInjectMode: config.recallInjectMode,
   });
 
   const tools = createTools(client, bankId, config, state.missionsSet, logger);
